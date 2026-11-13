@@ -236,26 +236,28 @@ draw_ui() {
     # Divider below Service List Area
     print_box_divider
 
-    # 4. Information Area (Below Service List)
-    local info_text=""
-    if (( ${#VISIBLE_SERVICES[@]} > 0 )); then
-        local cur_svc="${VISIBLE_SERVICES[$SELECTED_ROW]}"
-        if (( INFO_MODE == 0 )); then
-            info_text="  Description: ${SVC_DESCRIPTION[$cur_svc]:-No description available}"
+    # 4. Information Area (Below Service List) — hidden when cheat sheet is active
+    if (( HELP_MODE == 0 )); then
+        local info_text=""
+        if (( ${#VISIBLE_SERVICES[@]} > 0 )); then
+            local cur_svc="${VISIBLE_SERVICES[$SELECTED_ROW]}"
+            if (( INFO_MODE == 0 )); then
+                info_text="  Description: ${SVC_DESCRIPTION[$cur_svc]:-No description available}"
+            else
+                local cpu_val="${CPU_USAGE[$cur_svc]:-0.0}"
+                local mem_val="${MEM_USAGE[$cur_svc]:-0.0}"
+                local pid_val="${SVC_PID[$cur_svc]:-0}"
+                [[ "$pid_val" == "0" ]] && pid_val="None"
+                info_text="  Resource Usage: CPU: ${cpu_val}% | Memory: ${mem_val} MB | PID: ${pid_val}"
+            fi
         else
-            local cpu_val="${CPU_USAGE[$cur_svc]:-0.0}"
-            local mem_val="${MEM_USAGE[$cur_svc]:-0.0}"
-            local pid_val="${SVC_PID[$cur_svc]:-0}"
-            [[ "$pid_val" == "0" ]] && pid_val="None"
-            info_text="  Resource Usage: CPU: ${cpu_val}% | Memory: ${mem_val} MB | PID: ${pid_val}"
+            info_text="  Information: No service selected"
         fi
-    else
-        info_text="  Information: No service selected"
-    fi
-    print_box_line "$info_text" "$COLOR_ACCENT"
+        print_box_line "$info_text" "$COLOR_ACCENT"
 
-    # Divider below Information Area
-    print_box_divider
+        # Divider below Information Area
+        print_box_divider
+    fi
 
     # 5. Hint Area (Below Information Area)
     local hint_text="  Hint: $(get_hint_text)"

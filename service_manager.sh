@@ -95,12 +95,28 @@ main() {
         fi
 
         # Normal Navigation Mode
+
+        # While cheat sheet is open, only ESC and q/Q are active
+        if (( HELP_MODE == 1 )); then
+            case "$key" in
+                ESC|h|H)
+                    HELP_MODE=0
+                    printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
+                    ;;
+                q|Q)
+                    break
+                    ;;
+            esac
+            continue
+        fi
+
         case "$key" in
             q|Q)
                 break
                 ;;
             h|H)
-                HELP_MODE=$(( 1 - HELP_MODE ))
+                HELP_MODE=1
+                printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
                 ;;
             c|C)
                 action_clear_config_logs
@@ -132,9 +148,7 @@ main() {
                 FOCUS_AREA="system"
                 ;;
             ESC)
-                if (( HELP_MODE == 1 )); then
-                    HELP_MODE=0
-                elif [[ -n "$SEARCH_QUERY" ]]; then
+                if [[ -n "$SEARCH_QUERY" ]]; then
                     SEARCH_QUERY=""
                     filter_services
                     CURRENT_STATUS="Status: Search filter cleared."
@@ -204,7 +218,8 @@ main() {
                             SEARCH_MODE=1
                             ;;
                         1)
-                            HELP_MODE=$(( 1 - HELP_MODE ))
+                            HELP_MODE=1
+                            printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
                             ;;
                         2)
                             action_clear_config_logs
