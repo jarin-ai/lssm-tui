@@ -13,8 +13,8 @@ manage, inspect, and log systemd services on Linux Mint and modern Linux.
 
 Options:
   --help          Display this help documentation and exit immediately.
-  --no-config     Disable reading or creating ~/.config/service_manager/services.conf.
-                  Use hardcoded fallback services: ssh, nginx, ufw, bluetooth, apache2.
+  --no-config     Ignore ~/.config/service_manager/services.conf even if it exists.
+                  Load all available services directly from systemctl instead.
   --no-log        Disable audit logging. Suppress all write operations to
   --nn-log        ~/.local/share/service_manager/service_manager.log.
 

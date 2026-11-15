@@ -40,7 +40,6 @@ readonly BOX_WIDTH=78
 readonly HBAR=$(printf "%0.s${BOX_H}" $(seq 1 $INNER_WIDTH))
 
 # Paths & Defaults
-readonly DEFAULT_SERVICES=("ssh" "nginx" "ufw" "bluetooth" "apache2")
 readonly CONFIG_DIR="${HOME}/.config/service_manager"
 readonly CONFIG_FILE="${CONFIG_DIR}/services.conf"
 readonly LOG_DIR="${HOME}/.local/share/service_manager"

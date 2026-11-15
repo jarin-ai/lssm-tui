@@ -4,37 +4,32 @@
 
 load_services() {
     SERVICES=()
-    if (( FLAG_NO_CONFIG == 1 )); then
-        SERVICES=("${DEFAULT_SERVICES[@]}")
-        return 0
-    fi
 
-    if [[ ! -f "$CONFIG_FILE" ]]; then
-        mkdir -p "$CONFIG_DIR" 2>/dev/null || true
-        cat << 'EOF' > "$CONFIG_FILE"
-# Service Manager Configuration
-# List systemd service names to monitor (one per line).
-# Blank lines and lines starting with '#' are ignored.
-ssh
-nginx
-ufw
-bluetooth
-apache2
-EOF
-    fi
-
-    if [[ -f "$CONFIG_FILE" ]]; then
+    # Config file takes priority when it exists and --no-config is not set
+    if (( FLAG_NO_CONFIG == 0 )) && [[ -f "$CONFIG_FILE" ]]; then
         while IFS= read -r line || [[ -n "$line" ]]; do
             line="${line#"${line%%[![:space:]]*}"}"
             line="${line%"${line##*[![:space:]]}"}"
             [[ -z "$line" || "$line" =~ ^# ]] && continue
-            SERVICES+=("$line")
+            SERVICES+=("${line%.service}")
         done < "$CONFIG_FILE"
+        if [[ ${#SERVICES[@]} -gt 0 ]]; then
+            return 0
+        fi
     fi
 
-    if [[ ${#SERVICES[@]} -eq 0 ]]; then
-        SERVICES=("${DEFAULT_SERVICES[@]}")
-    fi
+    # Fall back to querying systemctl for all installed service units
+    local unit_raw
+    unit_raw=$(systemctl list-unit-files --type=service --state=enabled,disabled --no-legend --no-pager 2>/dev/null || true)
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line%$'\r'}"
+        [[ -z "$line" ]] && continue
+        local unit_name="${line%% *}"          # first whitespace-delimited field
+        [[ "$unit_name" == *@* ]] && continue  # skip template units (e.g. getty@.service)
+        unit_name="${unit_name%.service}"      # strip .service suffix
+        [[ -z "$unit_name" ]] && continue
+        SERVICES+=("$unit_name")
+    done <<< "$unit_raw"
 }
 
 escape_glob() {
