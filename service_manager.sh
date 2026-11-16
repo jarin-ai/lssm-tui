@@ -206,7 +206,7 @@ main() {
                 ;;
             RIGHT)
                 if [[ "$FOCUS_AREA" == "system" ]]; then
-                    if (( SYS_BTN < 2 )); then
+                    if (( SYS_BTN < 3 )); then
                         (( SYS_BTN++ ))
                     fi
                 elif [[ "$FOCUS_AREA" == "services" ]]; then
@@ -222,10 +222,13 @@ main() {
                             SEARCH_MODE=1
                             ;;
                         1)
+                            toggle_list
+                            ;;
+                        2)
                             HELP_MODE=1
                             printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
                             ;;
-                        2)
+                        3)
                             action_clear_config_logs
                             printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
                             ;;
@@ -259,6 +262,30 @@ main() {
                                 ;;
                         esac
                     fi
+                fi
+                ;;
+            t|T)
+                toggle_list
+                ;;
+            a|A)
+                if [[ "$LIST_MODE" == "system" ]] && (( ${#VISIBLE_SERVICES[@]} > 0 )); then
+                    local target_svc="${VISIBLE_SERVICES[$SELECTED_ROW]}"
+                    add_to_user_config "$target_svc"
+                elif [[ "$LIST_MODE" == "user" ]]; then
+                    CURRENT_STATUS="Status: Switch to systemctl list first to add a service [t]."
+                fi
+                ;;
+            x|X)
+                if [[ "$LIST_MODE" == "user" ]] && (( ${#VISIBLE_SERVICES[@]} > 0 )); then
+                    local target_svc="${VISIBLE_SERVICES[$SELECTED_ROW]}"
+                    remove_from_user_config "$target_svc"
+                    # Clamp cursor after removal
+                    if (( SELECTED_ROW >= ${#USER_SERVICES[@]} )) && (( ${#USER_SERVICES[@]} > 0 )); then
+                        SELECTED_ROW=$(( ${#USER_SERVICES[@]} - 1 ))
+                    fi
+                    filter_services
+                elif [[ "$LIST_MODE" == "system" ]]; then
+                    CURRENT_STATUS="Status: Switch to user config list first to remove a service [t]."
                 fi
                 ;;
         esac

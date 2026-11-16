@@ -3,6 +3,9 @@
 # ==============================================================================
 SERVICES=()
 VISIBLE_SERVICES=()
+SYSCTRL_SERVICES=()   # Always loaded from systemctl list-unit-files
+USER_SERVICES=()       # Loaded from config file (may be empty)
+LIST_MODE="user"       # "user" or "system" — which list is currently displayed
 
 declare -A SVC_ACTIVE_STATE
 declare -A SVC_UNIT_STATE
@@ -12,7 +15,7 @@ declare -A CPU_USAGE
 declare -A MEM_USAGE
 
 FOCUS_AREA="services"      # "services" or "system"
-SYS_BTN=0                 # 0: [search], 1: [help], 2: [clear]
+SYS_BTN=0                 # 0: [search], 1: [list], 2: [help], 3: [clear]
 SELECTED_ROW=0            # Index within VISIBLE_SERVICES
 SELECTED_BTN=0            # 0: [action1], 1: [restart], 2: [action2]
 SCROLL_OFFSET=0           # Viewport scrolling offset

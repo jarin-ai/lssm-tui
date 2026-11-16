@@ -22,6 +22,10 @@ Keybindings & Controls:
   [Up / Down]     Navigate service rows or switch to top System Action Bar
   [Left / Right]  Navigate action buttons across highlighted row ([action1], [restart], [action2])
   [Enter]         Execute highlighted action (prompts [y/N] before stop/disable)
+  [t / T]         Toggle between user config list and systemctl list
+  [a / A]         Add highlighted service to user config (available in systemctl list)
+  [x / X]         Remove highlighted service from user config (available in user list)
+  [g / Home]      Jump directly to the top system action bar
   [/]             Enter Search Mode (filters services by name and description)
   [h / H]         Toggle keybinding cheat sheet view
   [c / C]         Clear config and audit logs (prompts confirmation, resets defaults)
@@ -31,6 +35,12 @@ Keybindings & Controls:
   [r / R]         Manually refresh systemd status cache and process metrics
   [ESC]           Exit active search mode, cheat sheet, or clear active search query
   [q / Q]         Cleanly exit service manager
+
+Service Lists:
+  User config     Services saved in ~/.config/service_manager/services.conf.
+                  Displayed by default when non-empty. Add with [a], remove with [x].
+  Systemctl list  All enabled/disabled services reported by systemctl list-unit-files.
+                  Displayed when user config is empty or when toggled with [t].
 
 Examples:
   ./service_manager.sh

@@ -14,8 +14,9 @@ get_hint_text() {
     if [[ "$FOCUS_AREA" == "system" ]]; then
         case "$SYS_BTN" in
             0) echo "Press [Enter] to enter Search Mode (or press '/')." ;;
-            1) echo "Press [Enter] to view keybinding cheat sheet (or press 'h')." ;;
-            2) echo "Press [Enter] to clear config & logs (or press 'c')." ;;
+            1) echo "Press [Enter] to toggle service list: user config <-> systemctl (or press 't')." ;;
+            2) echo "Press [Enter] to view keybinding cheat sheet (or press 'h')." ;;
+            3) echo "Press [Enter] to clear config & logs (or press 'c')." ;;
         esac
         return
     fi
@@ -26,24 +27,32 @@ get_hint_text() {
     fi
 
     local current_svc="${VISIBLE_SERVICES[$SELECTED_ROW]}"
+    # Build a context suffix showing available list-management actions
+    local list_hint=""
+    if [[ "$LIST_MODE" == "system" ]]; then
+        list_hint=" [a] add to user list."
+    else
+        list_hint=" [x] remove from user list."
+    fi
+
     case "$SELECTED_BTN" in
         0)
             local a_state="${SVC_ACTIVE_STATE[$current_svc]:-inactive}"
             if [[ "$a_state" == "active" ]]; then
-                echo "Press [Enter] to stop '${current_svc}' (requires confirmation). [g/Home] to jump to action bar."
+                echo "Press [Enter] to stop '${current_svc}' (requires confirmation). [g/Home] jump to bar.${list_hint}"
             else
-                echo "Press [Enter] to start '${current_svc}'. [g/Home] to jump to action bar."
+                echo "Press [Enter] to start '${current_svc}'. [g/Home] jump to bar.${list_hint}"
             fi
             ;;
         1)
-            echo "Press [Enter] to restart '${current_svc}'. [g/Home] to jump to action bar."
+            echo "Press [Enter] to restart '${current_svc}'. [g/Home] jump to bar.${list_hint}"
             ;;
         2)
             local u_state="${SVC_UNIT_STATE[$current_svc]:-disabled}"
             if [[ "$u_state" == "enabled" ]]; then
-                echo "Press [Enter] to disable '${current_svc}' (requires confirmation). [g/Home] to jump to action bar."
+                echo "Press [Enter] to disable '${current_svc}' (requires confirmation). [g/Home] jump to bar.${list_hint}"
             else
-                echo "Press [Enter] to enable '${current_svc}' on boot. [g/Home] to jump to action bar."
+                echo "Press [Enter] to enable '${current_svc}' on boot. [g/Home] jump to bar.${list_hint}"
             fi
             ;;
     esac
@@ -57,6 +66,9 @@ render_cheat_sheet() {
         "  [← / →]       Navigate action buttons across highlighted service row"
         "  [Enter]       Execute highlighted action (confirms stop/disable)"
         "  [g / Home]    Jump to system action bar (top command line)"
+        "  [t / T]       Toggle between user config list and systemctl list"
+        "  [a / A]       Add highlighted service to user config (systemctl list only)"
+        "  [x / X]       Remove highlighted service from user config (user list only)"
         "  [/]           Enter Search Mode (filters services by name & description)"
         "  [h / H]       Toggle this keybinding cheat sheet"
         "  [c / C]       Clear config and audit logs (prompts confirmation)"
@@ -78,7 +90,9 @@ draw_ui() {
 
     # 1. Application Title Banner (Very Top)
     print_box_top
-    local title_str="Linux systemctl manager"
+    local list_mode_label="systemctl"
+    [[ "$LIST_MODE" == "user" ]] && list_mode_label="user config"
+    local title_str="Linux systemctl manager  [${list_mode_label}]"
     local left_pad=$(( (INNER_WIDTH - ${#title_str}) / 2 ))
     local right_pad=$(( INNER_WIDTH - ${#title_str} - left_pad ))
     local p_title
@@ -104,20 +118,27 @@ draw_ui() {
             "$COLOR_BORDER" "$BOX_V" "$COLOR_RESET"
     else
         local btn_search_style="$COLOR_ACCENT"
+        local btn_list_style="$COLOR_ACCENT"
         local btn_help_style="$COLOR_ACCENT"
         local btn_clear_style="$COLOR_ACCENT"
 
         if [[ "$FOCUS_AREA" == "system" ]]; then
             (( SYS_BTN == 0 )) && btn_search_style="$COLOR_HIGHLIGHT" || btn_search_style="$COLOR_PRIMARY"
-            (( SYS_BTN == 1 )) && btn_help_style="$COLOR_HIGHLIGHT" || btn_help_style="$COLOR_PRIMARY"
-            (( SYS_BTN == 2 )) && btn_clear_style="$COLOR_HIGHLIGHT" || btn_clear_style="$COLOR_PRIMARY"
+            (( SYS_BTN == 1 )) && btn_list_style="$COLOR_HIGHLIGHT"   || btn_list_style="$COLOR_PRIMARY"
+            (( SYS_BTN == 2 )) && btn_help_style="$COLOR_HIGHLIGHT"   || btn_help_style="$COLOR_PRIMARY"
+            (( SYS_BTN == 3 )) && btn_clear_style="$COLOR_HIGHLIGHT"  || btn_clear_style="$COLOR_PRIMARY"
         fi
 
-        local plain_len=41 # "  Actions:  [search]    [help]    [clear]"
+        # List toggle button label shows active mode
+        local list_label="list:sys"
+        [[ "$LIST_MODE" == "user" ]] && list_label="list:usr"
+
+        # Plain char counts: "  Actions:  [search]  [list:usr]  [help]  [clear]" = 51
+        local plain_len=51
         local pad_sys_len=$(( INNER_WIDTH - plain_len ))
         local pad_sys
         printf -v pad_sys "%*s" "$pad_sys_len" ""
-        local sys_line="  Actions:  ${btn_search_style}[search]${COLOR_RESET}    ${btn_help_style}[help]${COLOR_RESET}    ${btn_clear_style}[clear]${COLOR_RESET}${pad_sys}"
+        local sys_line="  Actions:  ${btn_search_style}[search]${COLOR_RESET}  ${btn_list_style}[${list_label}]${COLOR_RESET}  ${btn_help_style}[help]${COLOR_RESET}  ${btn_clear_style}[clear]${COLOR_RESET}${pad_sys}"
 
         printf '%s%s%s%s%s%s%s\n' \
             "$COLOR_BORDER" "$BOX_V" "$COLOR_RESET" \
