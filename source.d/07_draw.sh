@@ -30,20 +30,20 @@ get_hint_text() {
         0)
             local a_state="${SVC_ACTIVE_STATE[$current_svc]:-inactive}"
             if [[ "$a_state" == "active" ]]; then
-                echo "Press [Enter] to stop '${current_svc}' (requires confirmation)."
+                echo "Press [Enter] to stop '${current_svc}' (requires confirmation). [g/Home] to jump to action bar."
             else
-                echo "Press [Enter] to start '${current_svc}'."
+                echo "Press [Enter] to start '${current_svc}'. [g/Home] to jump to action bar."
             fi
             ;;
         1)
-            echo "Press [Enter] to restart '${current_svc}'."
+            echo "Press [Enter] to restart '${current_svc}'. [g/Home] to jump to action bar."
             ;;
         2)
             local u_state="${SVC_UNIT_STATE[$current_svc]:-disabled}"
             if [[ "$u_state" == "enabled" ]]; then
-                echo "Press [Enter] to disable '${current_svc}' (requires confirmation)."
+                echo "Press [Enter] to disable '${current_svc}' (requires confirmation). [g/Home] to jump to action bar."
             else
-                echo "Press [Enter] to enable '${current_svc}' on boot."
+                echo "Press [Enter] to enable '${current_svc}' on boot. [g/Home] to jump to action bar."
             fi
             ;;
     esac
@@ -56,6 +56,7 @@ render_cheat_sheet() {
         "  [↑ / ↓]       Navigate service rows or switch to system action bar"
         "  [← / →]       Navigate action buttons across highlighted service row"
         "  [Enter]       Execute highlighted action (confirms stop/disable)"
+        "  [g / Home]    Jump to system action bar (top command line)"
         "  [/]           Enter Search Mode (filters services by name & description)"
         "  [h / H]       Toggle this keybinding cheat sheet"
         "  [c / C]       Clear config and audit logs (prompts confirmation)"

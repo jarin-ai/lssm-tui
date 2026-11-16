@@ -21,6 +21,7 @@ read_key() {
                 C) echo "RIGHT"; return 0 ;;
                 D) echo "LEFT"; return 0 ;;
                 Z) echo "BTAB"; return 0 ;;
+                H) echo "HOME"; return 0 ;;
                 *) echo "ESC"; return 0 ;;
             esac
         fi

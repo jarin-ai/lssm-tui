@@ -189,6 +189,10 @@ main() {
                     fi
                 fi
                 ;;
+            g|G|HOME)
+                FOCUS_AREA="system"
+                SYS_BTN=0
+                ;;
             LEFT)
                 if [[ "$FOCUS_AREA" == "system" ]]; then
                     if (( SYS_BTN > 0 )); then
