@@ -1,7 +1,6 @@
 # ==============================================================================
 # COMMAND LINE INTERFACE (CLI OPTIONS)
 # ==============================================================================
-FLAG_NO_CONFIG=0
 FLAG_NO_LOG=0
 
 show_help() {
@@ -13,8 +12,6 @@ manage, inspect, and log systemd services on Linux Mint and modern Linux.
 
 Options:
   --help          Display this help documentation and exit immediately.
-  --no-config     Ignore ~/.config/service_manager/services.conf even if it exists.
-                  Load all available services directly from systemctl instead.
   --no-log        Disable audit logging. Suppress all write operations to
   --nn-log        ~/.local/share/service_manager/service_manager.log.
 
@@ -44,9 +41,7 @@ Service Lists:
 
 Examples:
   ./service_manager.sh
-  ./service_manager.sh --no-config
   ./service_manager.sh --no-log
-  ./service_manager.sh --no-config --no-log
 EOF
 }
 
@@ -56,10 +51,6 @@ while [[ $# -gt 0 ]]; do
         --help|-h)
             show_help
             exit 0
-            ;;
-        --no-config)
-            FLAG_NO_CONFIG=1
-            shift
             ;;
         --no-log|--nn-log)
             FLAG_NO_LOG=1

@@ -119,9 +119,7 @@ action_clear_config_logs() {
         return 0
     fi
 
-    if (( FLAG_NO_CONFIG == 0 )); then
-        rm -f "$CONFIG_FILE" 2>/dev/null || true
-    fi
+    rm -f "$CONFIG_FILE" 2>/dev/null || true
 
     if (( FLAG_NO_LOG == 0 )); then
         rm -f "$LOG_FILE" 2>/dev/null || true

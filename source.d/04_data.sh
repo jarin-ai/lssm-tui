@@ -25,7 +25,7 @@ _load_sysctrl_services() {
 # Populate USER_SERVICES from the config file
 _load_user_services() {
     USER_SERVICES=()
-    if (( FLAG_NO_CONFIG == 1 )) || [[ ! -f "$CONFIG_FILE" ]]; then
+    if [[ ! -f "$CONFIG_FILE" ]]; then
         return 0
     fi
     while IFS= read -r line || [[ -n "$line" ]]; do
@@ -90,9 +90,6 @@ toggle_list() {
 
 # Write current USER_SERVICES to the config file
 _save_user_config() {
-    if (( FLAG_NO_CONFIG == 1 )); then
-        return 0
-    fi
     mkdir -p "$CONFIG_DIR" 2>/dev/null || true
     : > "$CONFIG_FILE"
     for svc in "${USER_SERVICES[@]}"; do
