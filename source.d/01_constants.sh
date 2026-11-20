@@ -40,8 +40,13 @@ readonly BOX_WIDTH=78
 readonly HBAR=$(printf "%0.s${BOX_H}" $(seq 1 $INNER_WIDTH))
 
 # Paths & Defaults
-readonly CONFIG_DIR="${HOME}/.config/service_manager"
+# Resolve the invoking user's home directory so paths are correct even when
+# the script is executed via sudo (where $HOME is /root, not the caller's home).
+_REAL_USER="${SUDO_USER:-${USER:-$(id -un)}}"
+_REAL_HOME="$(getent passwd "$_REAL_USER" 2>/dev/null | cut -d: -f6)"
+[[ -z "$_REAL_HOME" ]] && _REAL_HOME="$HOME"
+readonly CONFIG_DIR="${_REAL_HOME}/.config/service_manager"
 readonly CONFIG_FILE="${_OVERRIDE_CONFIG_FILE:-${CONFIG_DIR}/services.conf}"
-readonly LOG_DIR="${HOME}/.local/share/service_manager"
+readonly LOG_DIR="${_REAL_HOME}/.local/share/service_manager"
 readonly LOG_FILE="${_OVERRIDE_LOG_FILE:-${LOG_DIR}/service_manager.log}"
 readonly SCRIPTS_DIR="${_OVERRIDE_SCRIPTS_DIR:-${LOG_DIR}/scripts}"
