@@ -220,21 +220,21 @@ main() {
                 if [[ "$FOCUS_AREA" == "system" ]]; then
                     case "$SYS_BTN" in
                         0)
-                            SEARCH_MODE=1
-                            ;;
-                        1)
                             toggle_list
                             ;;
-                        2)
-                            HELP_MODE=1
+                        1)
+                            show_scripts_modal
                             printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
+                            ;;
+                        2)
+                            SEARCH_MODE=1
                             ;;
                         3)
                             action_clear_config_logs
                             printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
                             ;;
                         4)
-                            show_scripts_modal
+                            HELP_MODE=1
                             printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
                             ;;
                     esac
