@@ -41,7 +41,7 @@ readonly HBAR=$(printf "%0.s${BOX_H}" $(seq 1 $INNER_WIDTH))
 
 # Paths & Defaults
 readonly CONFIG_DIR="${HOME}/.config/service_manager"
-readonly CONFIG_FILE="${CONFIG_DIR}/services.conf"
+readonly CONFIG_FILE="${_OVERRIDE_CONFIG_FILE:-${CONFIG_DIR}/services.conf}"
 readonly LOG_DIR="${HOME}/.local/share/service_manager"
-readonly LOG_FILE="${LOG_DIR}/service_manager.log"
-readonly SCRIPTS_DIR="${HOME}/.local/share/service_manager/scripts"
+readonly LOG_FILE="${_OVERRIDE_LOG_FILE:-${LOG_DIR}/service_manager.log}"
+readonly SCRIPTS_DIR="${_OVERRIDE_SCRIPTS_DIR:-${LOG_DIR}/scripts}"

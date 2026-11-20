@@ -12,8 +12,8 @@ set -o pipefail
 # ==============================================================================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-source "${SCRIPT_DIR}/source.d/00_constants.sh"  # Colors, box chars, layout dims, paths
-source "${SCRIPT_DIR}/source.d/01_cli.sh"         # CLI flags, show_help(), option parsing
+source "${SCRIPT_DIR}/source.d/00_cli.sh"         # CLI flags, show_help(), option parsing
+source "${SCRIPT_DIR}/source.d/01_constants.sh"  # Colors, box chars, layout dims, paths
 source "${SCRIPT_DIR}/source.d/02_state.sh"        # State variables & associative arrays
 source "${SCRIPT_DIR}/source.d/03_terminal.sh"     # Terminal helpers, cleanup trap, audit_log
 source "${SCRIPT_DIR}/source.d/04_data.sh"         # load_services, filter_services, refresh_data
