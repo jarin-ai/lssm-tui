@@ -21,6 +21,7 @@ source "${SCRIPT_DIR}/source.d/05_ui_helpers.sh"   # print_box_* frame drawing h
 source "${SCRIPT_DIR}/source.d/06_modals.sh"       # Modals, prompts & service actions
 source "${SCRIPT_DIR}/source.d/07_draw.sh"         # get_hint_text, render_cheat_sheet, draw_ui
 source "${SCRIPT_DIR}/source.d/08_input.sh"        # read_key, handle_resize, WINCH trap
+source "${SCRIPT_DIR}/source.d/09_scripts.sh"     # load_scripts, show_scripts_modal
 
 # ==============================================================================
 # MAIN ENTRY POINT
@@ -206,7 +207,7 @@ main() {
                 ;;
             RIGHT)
                 if [[ "$FOCUS_AREA" == "system" ]]; then
-                    if (( SYS_BTN < 3 )); then
+                    if (( SYS_BTN < 4 )); then
                         (( SYS_BTN++ ))
                     fi
                 elif [[ "$FOCUS_AREA" == "services" ]]; then
@@ -230,6 +231,10 @@ main() {
                             ;;
                         3)
                             action_clear_config_logs
+                            printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
+                            ;;
+                        4)
+                            show_scripts_modal
                             printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
                             ;;
                     esac
@@ -266,6 +271,10 @@ main() {
                 ;;
             t|T)
                 toggle_list
+                ;;
+            s|S)
+                show_scripts_modal
+                printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
                 ;;
             a|A)
                 if [[ "$LIST_MODE" == "system" ]] && (( ${#VISIBLE_SERVICES[@]} > 0 )); then

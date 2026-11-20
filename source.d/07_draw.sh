@@ -17,6 +17,7 @@ get_hint_text() {
             1) echo "Press [Enter] to toggle service list: user config <-> systemctl (or press 't')." ;;
             2) echo "Press [Enter] to view keybinding cheat sheet (or press 'h')." ;;
             3) echo "Press [Enter] to clear config & logs (or press 'c')." ;;
+            4) echo "Press [Enter] to open User Scripts browser (or press 's')." ;;
         esac
         return
     fi
@@ -72,6 +73,7 @@ render_cheat_sheet() {
         "  [/]           Enter Search Mode (filters services by name & description)"
         "  [h / H]       Toggle this keybinding cheat sheet"
         "  [c / C]       Clear config and audit logs (prompts confirmation)"
+        "  [s / S]       Open User Scripts browser"
         "  [d / D]       Toggle Information Area (Description <-> CPU/Memory/PID)"
         "  [l / L]       Open journalctl log viewer modal (last 30 entries)"
         "  [i / I]       Open systemctl status inspection modal"
@@ -121,24 +123,26 @@ draw_ui() {
         local btn_list_style="$COLOR_ACCENT"
         local btn_help_style="$COLOR_ACCENT"
         local btn_clear_style="$COLOR_ACCENT"
+        local btn_scripts_style="$COLOR_ACCENT"
 
         if [[ "$FOCUS_AREA" == "system" ]]; then
             (( SYS_BTN == 0 )) && btn_search_style="$COLOR_HIGHLIGHT" || btn_search_style="$COLOR_PRIMARY"
             (( SYS_BTN == 1 )) && btn_list_style="$COLOR_HIGHLIGHT"   || btn_list_style="$COLOR_PRIMARY"
             (( SYS_BTN == 2 )) && btn_help_style="$COLOR_HIGHLIGHT"   || btn_help_style="$COLOR_PRIMARY"
             (( SYS_BTN == 3 )) && btn_clear_style="$COLOR_HIGHLIGHT"  || btn_clear_style="$COLOR_PRIMARY"
+            (( SYS_BTN == 4 )) && btn_scripts_style="$COLOR_HIGHLIGHT" || btn_scripts_style="$COLOR_PRIMARY"
         fi
 
         # List toggle button label shows active mode
         local list_label="list:sys"
         [[ "$LIST_MODE" == "user" ]] && list_label="list:usr"
 
-        # Plain char counts: "  Actions:  [search]  [list:usr]  [help]  [clear]" = 51
-        local plain_len=51
+        # Plain char counts: "  Actions:  [search]  [list:usr]  [help]  [clear]  [scripts]" = 61
+        local plain_len=61
         local pad_sys_len=$(( INNER_WIDTH - plain_len ))
         local pad_sys
         printf -v pad_sys "%*s" "$pad_sys_len" ""
-        local sys_line="  Actions:  ${btn_search_style}[search]${COLOR_RESET}  ${btn_list_style}[${list_label}]${COLOR_RESET}  ${btn_help_style}[help]${COLOR_RESET}  ${btn_clear_style}[clear]${COLOR_RESET}${pad_sys}"
+        local sys_line="  Actions:  ${btn_search_style}[search]${COLOR_RESET}  ${btn_list_style}[${list_label}]${COLOR_RESET}  ${btn_help_style}[help]${COLOR_RESET}  ${btn_clear_style}[clear]${COLOR_RESET}  ${btn_scripts_style}[scripts]${COLOR_RESET}${pad_sys}"
 
         printf '%s%s%s%s%s%s%s\n' \
             "$COLOR_BORDER" "$BOX_V" "$COLOR_RESET" \
