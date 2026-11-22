@@ -46,6 +46,7 @@ main() {
 
     load_services
     refresh_data
+    CURRENT_STATUS="Status: Ready."
 
     # Initial Screen Clear
     printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
@@ -210,6 +211,7 @@ main() {
                     if (( SYS_BTN < 4 )); then
                         (( SYS_BTN++ ))
                     fi
+
                 elif [[ "$FOCUS_AREA" == "services" ]]; then
                     if (( SELECTED_BTN < 2 )); then
                         (( SELECTED_BTN++ ))
@@ -220,7 +222,8 @@ main() {
                 if [[ "$FOCUS_AREA" == "system" ]]; then
                     case "$SYS_BTN" in
                         0)
-                            toggle_list
+                            refresh_data
+                            CURRENT_STATUS="Status: Systemd cache and process metrics refreshed."
                             ;;
                         1)
                             show_scripts_modal
@@ -270,31 +273,29 @@ main() {
                 fi
                 ;;
             t|T)
-                toggle_list
+                refresh_data
+                CURRENT_STATUS="Status: Systemd cache and process metrics refreshed."
                 ;;
             s|S)
                 show_scripts_modal
                 printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
                 ;;
             a|A)
-                if [[ "$LIST_MODE" == "system" ]] && (( ${#VISIBLE_SERVICES[@]} > 0 )); then
+                if (( ${#VISIBLE_SERVICES[@]} > 0 )); then
                     local target_svc="${VISIBLE_SERVICES[$SELECTED_ROW]}"
                     add_to_user_config "$target_svc"
-                elif [[ "$LIST_MODE" == "user" ]]; then
-                    CURRENT_STATUS="Status: Switch to systemctl list first to add a service [t]."
+                    filter_services
                 fi
                 ;;
             x|X)
-                if [[ "$LIST_MODE" == "user" ]] && (( ${#VISIBLE_SERVICES[@]} > 0 )); then
+                if (( ${#VISIBLE_SERVICES[@]} > 0 )); then
                     local target_svc="${VISIBLE_SERVICES[$SELECTED_ROW]}"
                     remove_from_user_config "$target_svc"
                     # Clamp cursor after removal
-                    if (( SELECTED_ROW >= ${#USER_SERVICES[@]} )) && (( ${#USER_SERVICES[@]} > 0 )); then
-                        SELECTED_ROW=$(( ${#USER_SERVICES[@]} - 1 ))
+                    if (( SELECTED_ROW >= ${#VISIBLE_SERVICES[@]} )) && (( ${#VISIBLE_SERVICES[@]} > 0 )); then
+                        SELECTED_ROW=$(( ${#VISIBLE_SERVICES[@]} - 1 ))
                     fi
                     filter_services
-                elif [[ "$LIST_MODE" == "system" ]]; then
-                    CURRENT_STATUS="Status: Switch to user config list first to remove a service [t]."
                 fi
                 ;;
         esac

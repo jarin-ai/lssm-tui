@@ -2,10 +2,6 @@
 # DATA LOADING, FILTERING & REFRESH
 # ==============================================================================
 
-# ==============================================================================
-# DATA LOADING, FILTERING & REFRESH
-# ==============================================================================
-
 # Populate SYSCTRL_SERVICES from systemctl
 _load_sysctrl_services() {
     SYSCTRL_SERVICES=()
@@ -36,56 +32,9 @@ _load_user_services() {
     done < "$CONFIG_FILE"
 }
 
-# Point SERVICES at the currently active list
-_apply_list_mode() {
-    if [[ "$LIST_MODE" == "user" ]] && (( ${#USER_SERVICES[@]} > 0 )); then
-        SERVICES=("${USER_SERVICES[@]}")
-    else
-        LIST_MODE="system"
-        SERVICES=("${SYSCTRL_SERVICES[@]}")
-    fi
-}
-
 load_services() {
     _load_sysctrl_services
     _load_user_services
-
-    # Startup rule: show user list first if non-empty, else systemctl
-    if (( ${#USER_SERVICES[@]} > 0 )); then
-        LIST_MODE="user"
-    else
-        LIST_MODE="system"
-    fi
-
-    _apply_list_mode
-}
-
-# Switch the active list (call with "user" or "system")
-switch_list() {
-    local target_mode="$1"
-    if [[ "$target_mode" == "user" ]] && (( ${#USER_SERVICES[@]} == 0 )); then
-        CURRENT_STATUS="Status: User config list is empty. Add services with [a]."
-        return 0
-    fi
-    LIST_MODE="$target_mode"
-    _apply_list_mode
-    SELECTED_ROW=0
-    SCROLL_OFFSET=0
-    SEARCH_QUERY=""
-    refresh_data
-}
-
-# Toggle between user and system list
-toggle_list() {
-    if [[ "$LIST_MODE" == "user" ]]; then
-        switch_list "system"
-        CURRENT_STATUS="Status: Switched to systemctl service list."
-    else
-        switch_list "user"
-        if [[ "$LIST_MODE" == "user" ]]; then
-            CURRENT_STATUS="Status: Switched to user config service list."
-        fi
-    fi
 }
 
 # Write current USER_SERVICES to the config file
@@ -97,23 +46,23 @@ _save_user_config() {
     done
 }
 
-# Add a service to the user config list (no duplicates)
+# Pin a service (add to user config)
 add_to_user_config() {
     local svc="$1"
     # Duplicate check
     for existing in "${USER_SERVICES[@]+"${USER_SERVICES[@]}"}"; do
         if [[ "$existing" == "$svc" ]]; then
-            CURRENT_STATUS="Status: '${svc}' is already in user config list."
+            CURRENT_STATUS="Status: '${svc}' is already pinned."
             return 0
         fi
     done
     USER_SERVICES+=("$svc")
     _save_user_config
-    audit_log "ADD_CONFIG" "$svc" "SUCCESS" "Added '${svc}' to user config"
-    CURRENT_STATUS="Status: '${svc}' added to user config list."
+    audit_log "ADD_CONFIG" "$svc" "SUCCESS" "Pinned '${svc}'"
+    CURRENT_STATUS="Status: '${svc}' pinned to top."
 }
 
-# Remove a service from the user config list
+# Unpin a service (remove from user config)
 remove_from_user_config() {
     local svc="$1"
     local new_list=()
@@ -126,22 +75,13 @@ remove_from_user_config() {
         fi
     done
     if (( found == 0 )); then
-        CURRENT_STATUS="Status: '${svc}' not found in user config list."
+        CURRENT_STATUS="Status: '${svc}' is not pinned."
         return 0
     fi
     USER_SERVICES=("${new_list[@]+"${new_list[@]}"}")
     _save_user_config
-    audit_log "REMOVE_CONFIG" "$svc" "SUCCESS" "Removed '${svc}' from user config"
-    CURRENT_STATUS="Status: '${svc}' removed from user config list."
-
-    # If user list is now empty, auto-switch to system list
-    if (( ${#USER_SERVICES[@]} == 0 )); then
-        LIST_MODE="system"
-        _apply_list_mode
-        SELECTED_ROW=0
-        SCROLL_OFFSET=0
-        CURRENT_STATUS="Status: User config list is now empty. Switched to systemctl list."
-    fi
+    audit_log "REMOVE_CONFIG" "$svc" "SUCCESS" "Unpinned '${svc}'"
+    CURRENT_STATUS="Status: '${svc}' unpinned."
 }
 
 escape_glob() {
@@ -154,22 +94,49 @@ escape_glob() {
     printf '%s' "$str"
 }
 
+# Return 0 if the given service is in USER_SERVICES (pinned), 1 otherwise.
+_is_pinned() {
+    local svc="$1"
+    for p in "${USER_SERVICES[@]+"${USER_SERVICES[@]}"}"; do
+        [[ "$p" == "$svc" ]] && return 0
+    done
+    return 1
+}
+
+# Build VISIBLE_SERVICES as: matching pinned services first, then matching
+# system (sysctrl) services that are NOT pinned.
+# PINNED_COUNT is set to the number of pinned rows at the top of VISIBLE_SERVICES.
 filter_services() {
     VISIBLE_SERVICES=()
+    PINNED_COUNT=0
     shopt -s nocasematch
-    if [[ -z "$SEARCH_QUERY" ]]; then
-        VISIBLE_SERVICES=("${SERVICES[@]}")
-    else
-        local safe_q
+
+    local safe_q pat=""
+    if [[ -n "$SEARCH_QUERY" ]]; then
         safe_q=$(escape_glob "$SEARCH_QUERY")
-        local pat="*${safe_q}*"
-        for s in "${SERVICES[@]}"; do
-            local desc="${SVC_DESCRIPTION[$s]:-}"
-            if [[ "$s" == $pat || "$desc" == $pat ]]; then
-                VISIBLE_SERVICES+=("$s")
-            fi
-        done
+        pat="*${safe_q}*"
     fi
+
+    # --- Pinned section ---
+    for s in "${USER_SERVICES[@]+"${USER_SERVICES[@]}"}"; do
+        if [[ -n "$pat" ]]; then
+            local desc="${SVC_DESCRIPTION[$s]:-}"
+            [[ "$s" == $pat || "$desc" == $pat ]] || continue
+        fi
+        VISIBLE_SERVICES+=("$s")
+        (( PINNED_COUNT++ ))
+    done
+
+    # --- System section (exclude pinned) ---
+    for s in "${SYSCTRL_SERVICES[@]+"${SYSCTRL_SERVICES[@]}"}"; do
+        _is_pinned "$s" && continue
+        if [[ -n "$pat" ]]; then
+            local desc="${SVC_DESCRIPTION[$s]:-}"
+            [[ "$s" == $pat || "$desc" == $pat ]] || continue
+        fi
+        VISIBLE_SERVICES+=("$s")
+    done
+
     shopt -u nocasematch
 
     if (( ${#VISIBLE_SERVICES[@]} == 0 )); then
@@ -180,13 +147,13 @@ filter_services() {
 }
 
 # 1. Batched Systemd Queries & 2. Batched Process Resource Metrics
-# Queries the union of USER_SERVICES and SERVICES so that metadata is always
-# populated regardless of which list is currently displayed.
+# Queries the union of USER_SERVICES and SYSCTRL_SERVICES so that metadata is
+# always populated regardless of which section is currently visible.
 refresh_data() {
-    # Build a deduplicated union of both lists for the metadata query
+    # Build a deduplicated union of pinned + sysctrl for the metadata query
     declare -A _seen_refresh=()
     local all_query=()
-    for s in "${SERVICES[@]+"${SERVICES[@]}"}" "${USER_SERVICES[@]+"${USER_SERVICES[@]}"}"; do
+    for s in "${USER_SERVICES[@]+"${USER_SERVICES[@]}"}" "${SYSCTRL_SERVICES[@]+"${SYSCTRL_SERVICES[@]}"}"; do
         if [[ -z "${_seen_refresh[$s]+set}" ]]; then
             _seen_refresh["$s"]=1
             all_query+=("$s")

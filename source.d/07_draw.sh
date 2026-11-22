@@ -13,7 +13,7 @@ get_hint_text() {
     fi
     if [[ "$FOCUS_AREA" == "system" ]]; then
         case "$SYS_BTN" in
-            0) echo "Press [Enter] to toggle service list: user config <-> systemctl (or press 't')." ;;
+            0) echo "Press [Enter] to refresh the combined service list (or press 'r')." ;;
             1) echo "Press [Enter] to open User Scripts browser (or press 's')." ;;
             2) echo "Press [Enter] to enter Search Mode (or press '/')." ;;
             3) echo "Press [Enter] to clear config & logs (or press 'c')." ;;
@@ -28,12 +28,12 @@ get_hint_text() {
     fi
 
     local current_svc="${VISIBLE_SERVICES[$SELECTED_ROW]}"
-    # Build a context suffix showing available list-management actions
+    # Build a context suffix showing available pin/unpin actions
     local list_hint=""
-    if [[ "$LIST_MODE" == "system" ]]; then
-        list_hint=" [a] add to user list."
+    if _is_pinned "$current_svc"; then
+        list_hint=" [x] unpin service."
     else
-        list_hint=" [x] remove from user list."
+        list_hint=" [a] pin service to top."
     fi
 
     case "$SELECTED_BTN" in
@@ -67,9 +67,8 @@ render_cheat_sheet() {
         "  [← / →]       Navigate action buttons across highlighted service row"
         "  [Enter]       Execute highlighted action (confirms stop/disable)"
         "  [g / Home]    Jump to system action bar (top command line)"
-        "  [t / T]       Toggle between user config list and systemctl list"
-        "  [a / A]       Add highlighted service to user config (systemctl list only)"
-        "  [x / X]       Remove highlighted service from user config (user list only)"
+        "  [a / A]       Pin highlighted service to top of list"
+        "  [x / X]       Unpin highlighted service from top of list"
         "  [/]           Enter Search Mode (filters services by name & description)"
         "  [h / H]       Toggle this keybinding cheat sheet"
         "  [c / C]       Clear config and audit logs (prompts confirmation)"
@@ -86,15 +85,30 @@ render_cheat_sheet() {
     done
 }
 
+# Draw an inline separator row between pinned and system sections.
+# Shows a dim horizontal rule with a centred label.
+_draw_pin_separator() {
+    local label=" ── pinned ──────────────────────────── systemctl ── "
+    local llen=${#label}
+    local left_pad=$(( (INNER_WIDTH - llen) / 2 ))
+    local right_pad=$(( INNER_WIDTH - llen - left_pad ))
+    local lp rp
+    printf -v lp "%*s" "$left_pad" ""
+    printf -v rp "%*s" "$right_pad" ""
+    local sep_line="${lp}${label}${rp}"
+    printf '%s%s%s%s%s%s%s\n' \
+        "$COLOR_BORDER" "$BOX_V" "$COLOR_RESET" \
+        "${COLOR_MUTED}${sep_line}${COLOR_RESET}" \
+        "$COLOR_BORDER" "$BOX_V" "$COLOR_RESET"
+}
+
 draw_ui() {
     # Move to Home without clearing to eliminate screen flicker
     printf '%s' "$TERM_CURSOR_HOME"
 
     # 1. Application Title Banner (Very Top)
     print_box_top
-    local list_mode_label="systemctl"
-    [[ "$LIST_MODE" == "user" ]] && list_mode_label="user config"
-    local title_str="Linux systemctl manager  [${list_mode_label}]"
+    local title_str="Linux systemctl manager"
     local left_pad=$(( (INNER_WIDTH - ${#title_str}) / 2 ))
     local right_pad=$(( INNER_WIDTH - ${#title_str} - left_pad ))
     local p_title
@@ -119,30 +133,26 @@ draw_ui() {
             "$search_line" \
             "$COLOR_BORDER" "$BOX_V" "$COLOR_RESET"
     else
-        local btn_search_style="$COLOR_ACCENT"
-        local btn_list_style="$COLOR_ACCENT"
-        local btn_help_style="$COLOR_ACCENT"
-        local btn_clear_style="$COLOR_ACCENT"
+        local btn_services_style="$COLOR_ACCENT"
         local btn_scripts_style="$COLOR_ACCENT"
+        local btn_search_style="$COLOR_ACCENT"
+        local btn_clear_style="$COLOR_ACCENT"
+        local btn_help_style="$COLOR_ACCENT"
 
         if [[ "$FOCUS_AREA" == "system" ]]; then
-            (( SYS_BTN == 0 )) && btn_list_style="$COLOR_HIGHLIGHT"    || btn_list_style="$COLOR_PRIMARY"
-            (( SYS_BTN == 1 )) && btn_scripts_style="$COLOR_HIGHLIGHT" || btn_scripts_style="$COLOR_PRIMARY"
-            (( SYS_BTN == 2 )) && btn_search_style="$COLOR_HIGHLIGHT"  || btn_search_style="$COLOR_PRIMARY"
-            (( SYS_BTN == 3 )) && btn_clear_style="$COLOR_HIGHLIGHT"   || btn_clear_style="$COLOR_PRIMARY"
-            (( SYS_BTN == 4 )) && btn_help_style="$COLOR_HIGHLIGHT"    || btn_help_style="$COLOR_PRIMARY"
+            (( SYS_BTN == 0 )) && btn_services_style="$COLOR_HIGHLIGHT" || btn_services_style="$COLOR_PRIMARY"
+            (( SYS_BTN == 1 )) && btn_scripts_style="$COLOR_HIGHLIGHT"  || btn_scripts_style="$COLOR_PRIMARY"
+            (( SYS_BTN == 2 )) && btn_search_style="$COLOR_HIGHLIGHT"   || btn_search_style="$COLOR_PRIMARY"
+            (( SYS_BTN == 3 )) && btn_clear_style="$COLOR_HIGHLIGHT"    || btn_clear_style="$COLOR_PRIMARY"
+            (( SYS_BTN == 4 )) && btn_help_style="$COLOR_HIGHLIGHT"     || btn_help_style="$COLOR_PRIMARY"
         fi
 
-        # List toggle button label shows active mode
-        local list_label="list:sys"
-        [[ "$LIST_MODE" == "user" ]] && list_label="list:usr"
-
-        # Plain char counts: "  Actions:  [list:usr]  [scripts]  [search]  [clear]  [help]" = 60
-        local plain_len=60
+        # Plain char counts: "  Actions:  [services]  [scripts]  [search]  [clear]  [help]" = 61
+        local plain_len=61
         local pad_sys_len=$(( INNER_WIDTH - plain_len ))
         local pad_sys
         printf -v pad_sys "%*s" "$pad_sys_len" ""
-        local sys_line="  Actions:  ${btn_list_style}[${list_label}]${COLOR_RESET}  ${btn_scripts_style}[scripts]${COLOR_RESET}  ${btn_search_style}[search]${COLOR_RESET}  ${btn_clear_style}[clear]${COLOR_RESET}  ${btn_help_style}[help]${COLOR_RESET}${pad_sys}"
+        local sys_line="  Actions:  ${btn_services_style}[services]${COLOR_RESET}  ${btn_scripts_style}[scripts]${COLOR_RESET}  ${btn_search_style}[search]${COLOR_RESET}  ${btn_clear_style}[clear]${COLOR_RESET}  ${btn_help_style}[help]${COLOR_RESET}${pad_sys}"
 
         printf '%s%s%s%s%s%s%s\n' \
             "$COLOR_BORDER" "$BOX_V" "$COLOR_RESET" \
@@ -159,21 +169,30 @@ draw_ui() {
     else
         # Column Header Row
         local p_hdr_name p_hdr_active p_hdr_btn1 p_hdr_btn2 p_hdr_unit p_hdr_btn3
-        printf -v p_hdr_name "%-16.16s" "SERVICE"
+        printf -v p_hdr_name   "%-16.16s" "SERVICE"
         printf -v p_hdr_active "%-12.12s" "STATE"
-        printf -v p_hdr_btn1 "%-9.9s" "ACTION 1"
-        printf -v p_hdr_btn2 "%-11.11s" "RESTART"
-        printf -v p_hdr_unit "%-11.11s" "STARTUP"
-        printf -v p_hdr_btn3 "%-9.9s" "ACTION 2"
+        printf -v p_hdr_btn1   "%-9.9s"   "ACTION 1"
+        printf -v p_hdr_btn2   "%-11.11s" "RESTART"
+        printf -v p_hdr_unit   "%-11.11s" "STARTUP"
+        printf -v p_hdr_btn3   "%-9.9s"   "ACTION 2"
 
         local hdr_content="  ${p_hdr_name} ${p_hdr_active} ${p_hdr_btn1} ${p_hdr_btn2} ${p_hdr_unit} ${p_hdr_btn3} "
         print_box_line "$hdr_content" "$COLOR_SECONDARY$COLOR_BOLD"
 
-        # Calculate visible rows and scroll window
+        # Calculate visible rows and scroll window.
+        # Reserve 1 extra row for the separator between pinned and system sections
+        # (only when both sections have matching entries).
+        local has_separator=0
+        if (( PINNED_COUNT > 0 && ${#VISIBLE_SERVICES[@]} > PINNED_COUNT )); then
+            has_separator=1
+        fi
+
         local available_rows=$(( TERM_LINES - 15 ))
-        (( available_rows < 5 )) && available_rows=5
+        (( available_rows < 5 ))  && available_rows=5
         (( available_rows > 15 )) && available_rows=15
 
+        # Scroll logic operates on virtual rows: each real service row maps 1-to-1,
+        # but the separator is an extra rendered line inserted between sections.
         if (( SELECTED_ROW < SCROLL_OFFSET )); then
             SCROLL_OFFSET=$SELECTED_ROW
         elif (( SELECTED_ROW >= SCROLL_OFFSET + available_rows )); then
@@ -187,75 +206,107 @@ draw_ui() {
                 print_box_line "" "$COLOR_TEXT"
             done
         else
-            for (( idx=0; idx < available_rows; idx++ )); do
-                local service_idx=$(( SCROLL_OFFSET + idx ))
-                if (( service_idx < total_visible )); then
-                    local svc="${VISIBLE_SERVICES[$service_idx]}"
-                    local a_state="${SVC_ACTIVE_STATE[$svc]:-unknown}"
-                    local u_state="${SVC_UNIT_STATE[$svc]:-unknown}"
+            # Render up to available_rows visual lines, accounting for the separator.
+            local rendered=0        # visual lines emitted so far
+            local service_idx=$SCROLL_OFFSET  # index into VISIBLE_SERVICES
 
-                    local btn1_label="[start]"
-                    [[ "$a_state" == "active" ]] && btn1_label="[stop]"
+            # Mark separator as already consumed if the scroll window starts past
+            # the pinned/system boundary (separator scrolled out of view above).
+            local sep_rendered=0
+            if (( has_separator == 0 || SCROLL_OFFSET > PINNED_COUNT )); then
+                sep_rendered=1
+            fi
 
-                    local btn2_label="[restart]"
-
-                    local btn3_label="[enable]"
-                    [[ "$u_state" == "enabled" ]] && btn3_label="[disable]"
-
-                    # ANSI Padding Rule: ALWAYS pad plain text with printf BEFORE applying semantic colors
-                    local pad_svc pad_act pad_b1 pad_b2 pad_unt pad_b3
-                    printf -v pad_svc "%-16.16s" "$svc"
-                    printf -v pad_act "%-12.12s" "$a_state"
-                    printf -v pad_b1 "%-9.9s" "$btn1_label"
-                    printf -v pad_b2 "%-11.11s" "$btn2_label"
-                    printf -v pad_unt "%-11.11s" "$u_state"
-                    printf -v pad_b3 "%-9.9s" "$btn3_label"
-
-                    # Apply semantic color styling
-                    local col_svc="$COLOR_TEXT"
-                    local is_row_active=0
-                    if [[ "$FOCUS_AREA" == "services" ]] && (( service_idx == SELECTED_ROW )); then
-                        is_row_active=1
-                        col_svc="${COLOR_BOLD}${COLOR_TEXT}"
-                    fi
-
-                    local col_act="$COLOR_MUTED"
-                    if [[ "$a_state" == "active" ]]; then
-                        col_act="$COLOR_SUCCESS"
-                    elif [[ "$a_state" == "failed" ]]; then
-                        col_act="${COLOR_ERROR}${COLOR_BOLD}"
-                    elif [[ "$a_state" =~ ^(activating|reloading|deactivating)$ ]]; then
-                        col_act="$COLOR_WARN"
-                    fi
-
-                    local col_unt="$COLOR_MUTED"
-                    if [[ "$u_state" == "enabled" ]]; then
-                        col_unt="$COLOR_SUCCESS"
-                    elif [[ "$u_state" == "masked" ]]; then
-                        col_unt="$COLOR_ERROR"
-                    elif [[ "$u_state" =~ ^(static|indirect)$ ]]; then
-                        col_unt="$COLOR_WARN"
-                    fi
-
-                    local col_b1="$COLOR_PRIMARY"
-                    local col_b2="$COLOR_PRIMARY"
-                    local col_b3="$COLOR_PRIMARY"
-
-                    if (( is_row_active == 1 )); then
-                        (( SELECTED_BTN == 0 )) && col_b1="$COLOR_HIGHLIGHT"
-                        (( SELECTED_BTN == 1 )) && col_b2="$COLOR_HIGHLIGHT"
-                        (( SELECTED_BTN == 2 )) && col_b3="$COLOR_HIGHLIGHT"
-                    fi
-
-                    local row_colored="  ${col_svc}${pad_svc}${COLOR_RESET} ${col_act}${pad_act}${COLOR_RESET} ${col_b1}${pad_b1}${COLOR_RESET} ${col_b2}${pad_b2}${COLOR_RESET} ${col_unt}${pad_unt}${COLOR_RESET} ${col_b3}${pad_b3}${COLOR_RESET} "
-                    printf '%s%s%s%s%s%s%s\n' \
-                        "$COLOR_BORDER" "$BOX_V" "$COLOR_RESET" \
-                        "$row_colored" \
-                        "$COLOR_BORDER" "$BOX_V" "$COLOR_RESET"
-                else
-                    print_box_line "" "$COLOR_TEXT"
+            while (( rendered < available_rows )); do
+                # Check: should we insert the separator here?
+                if (( sep_rendered == 0 && service_idx == PINNED_COUNT )); then
+                    _draw_pin_separator
+                    (( rendered++ ))
+                    sep_rendered=1
+                    (( rendered >= available_rows )) && break
                 fi
+
+                if (( service_idx >= total_visible )); then
+                    print_box_line "" "$COLOR_TEXT"
+                    (( rendered++ ))
+                    continue
+                fi
+
+                local svc="${VISIBLE_SERVICES[$service_idx]}"
+                local a_state="${SVC_ACTIVE_STATE[$svc]:-unknown}"
+                local u_state="${SVC_UNIT_STATE[$svc]:-unknown}"
+
+                local btn1_label="[start]"
+                [[ "$a_state" == "active" ]] && btn1_label="[stop]"
+                local btn2_label="[restart]"
+                local btn3_label="[enable]"
+                [[ "$u_state" == "enabled" ]] && btn3_label="[disable]"
+
+                # ANSI Padding Rule: ALWAYS pad plain text with printf BEFORE applying colors
+                local pad_svc pad_act pad_b1 pad_b2 pad_unt pad_b3
+                printf -v pad_svc "%-16.16s" "$svc"
+                printf -v pad_act "%-12.12s" "$a_state"
+                printf -v pad_b1  "%-9.9s"   "$btn1_label"
+                printf -v pad_b2  "%-11.11s" "$btn2_label"
+                printf -v pad_unt "%-11.11s" "$u_state"
+                printf -v pad_b3  "%-9.9s"   "$btn3_label"
+
+                # Apply semantic color styling
+                local col_svc="$COLOR_TEXT"
+                local is_row_active=0
+                if [[ "$FOCUS_AREA" == "services" ]] && (( service_idx == SELECTED_ROW )); then
+                    is_row_active=1
+                    col_svc="${COLOR_BOLD}${COLOR_TEXT}"
+                fi
+
+                # Pinned rows get a subtle accent tint on the name column
+                local pin_prefix=""
+                if _is_pinned "$svc"; then
+                    pin_prefix="${COLOR_ACCENT}"
+                    col_svc="${pin_prefix}"
+                    (( is_row_active == 1 )) && col_svc="${COLOR_BOLD}${COLOR_ACCENT}"
+                fi
+
+                local col_act="$COLOR_MUTED"
+                if [[ "$a_state" == "active" ]]; then
+                    col_act="$COLOR_SUCCESS"
+                elif [[ "$a_state" == "failed" ]]; then
+                    col_act="${COLOR_ERROR}${COLOR_BOLD}"
+                elif [[ "$a_state" =~ ^(activating|reloading|deactivating)$ ]]; then
+                    col_act="$COLOR_WARN"
+                fi
+
+                local col_unt="$COLOR_MUTED"
+                if [[ "$u_state" == "enabled" ]]; then
+                    col_unt="$COLOR_SUCCESS"
+                elif [[ "$u_state" == "masked" ]]; then
+                    col_unt="$COLOR_ERROR"
+                elif [[ "$u_state" =~ ^(static|indirect)$ ]]; then
+                    col_unt="$COLOR_WARN"
+                fi
+
+                local col_b1="$COLOR_PRIMARY"
+                local col_b2="$COLOR_PRIMARY"
+                local col_b3="$COLOR_PRIMARY"
+
+                if (( is_row_active == 1 )); then
+                    (( SELECTED_BTN == 0 )) && col_b1="$COLOR_HIGHLIGHT"
+                    (( SELECTED_BTN == 1 )) && col_b2="$COLOR_HIGHLIGHT"
+                    (( SELECTED_BTN == 2 )) && col_b3="$COLOR_HIGHLIGHT"
+                fi
+
+                local row_colored="  ${col_svc}${pad_svc}${COLOR_RESET} ${col_act}${pad_act}${COLOR_RESET} ${col_b1}${pad_b1}${COLOR_RESET} ${col_b2}${pad_b2}${COLOR_RESET} ${col_unt}${pad_unt}${COLOR_RESET} ${col_b3}${pad_b3}${COLOR_RESET} "
+                printf '%s%s%s%s%s%s%s\n' \
+                    "$COLOR_BORDER" "$BOX_V" "$COLOR_RESET" \
+                    "$row_colored" \
+                    "$COLOR_BORDER" "$BOX_V" "$COLOR_RESET"
+
+                (( service_idx++ ))
+                (( rendered++ ))
             done
+
+            # If separator was never rendered (all pinned rows scrolled out of view)
+            # and we ended before reaching it, that's fine — it's above the viewport.
         fi
     fi
 
