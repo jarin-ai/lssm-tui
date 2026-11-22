@@ -35,35 +35,11 @@ get_hint_text() {
     fi
 
     local current_svc="${VISIBLE_SERVICES[$SELECTED_ROW]}"
-    # Build a context suffix showing available pin/unpin actions
-    local list_hint=""
     if _is_pinned "$current_svc"; then
-        list_hint=" [x] unpin service."
+        echo "[x] unpin service. [l] logs. [i] status. [d] info. [r] refresh."
     else
-        list_hint=" [a] pin service to top."
+        echo "[a] pin service. [l] logs. [i] status. [d] info. [r] refresh."
     fi
-
-    case "$SELECTED_BTN" in
-        0)
-            local a_state="${SVC_ACTIVE_STATE[$current_svc]:-inactive}"
-            if [[ "$a_state" == "active" ]]; then
-                echo "Press [Enter] to stop '${current_svc}' (requires confirmation). [g/Home] jump to bar.${list_hint}"
-            else
-                echo "Press [Enter] to start '${current_svc}'. [g/Home] jump to bar.${list_hint}"
-            fi
-            ;;
-        1)
-            echo "Press [Enter] to restart '${current_svc}'. [g/Home] jump to bar.${list_hint}"
-            ;;
-        2)
-            local u_state="${SVC_UNIT_STATE[$current_svc]:-disabled}"
-            if [[ "$u_state" == "enabled" ]]; then
-                echo "Press [Enter] to disable '${current_svc}' (requires confirmation). [g/Home] jump to bar.${list_hint}"
-            else
-                echo "Press [Enter] to enable '${current_svc}' on boot. [g/Home] jump to bar.${list_hint}"
-            fi
-            ;;
-    esac
 }
 
 readonly CHEAT_LINES=(
