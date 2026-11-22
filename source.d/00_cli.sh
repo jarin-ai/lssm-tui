@@ -42,7 +42,7 @@ Keybindings & Controls:
   [l / L]         Open journalctl log viewer modal (services view)
   [i / I]         Open systemctl status inspection modal (services view)
   [r / R]         Manually refresh status cache / reload scripts
-  [ESC]           Exit active search mode, cheat sheet, or clear active search query
+  [ESC]           Exit active search mode or clear active search query
   [q / Q]         Cleanly exit service manager
 
 Service & Script Lists:

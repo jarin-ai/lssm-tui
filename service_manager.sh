@@ -52,13 +52,19 @@ main() {
     # Initial Screen Clear
     printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
 
+    local need_redraw=1
+
     while true; do
-        draw_ui
+        if (( need_redraw == 1 )); then
+            draw_ui
+            need_redraw=0
+        fi
 
         local key
         key=$(read_key) || break
 
         if (( SEARCH_MODE == 1 )); then
+            need_redraw=1
             case "$key" in
                 ENTER)
                     SEARCH_MODE=0
@@ -112,21 +118,99 @@ main() {
             continue
         fi
 
-        # Normal Navigation Mode
-
-        # While cheat sheet is open, only ESC and q/Q are active
+        # While cheat sheet is open: LEFT/RIGHT selects action, ENTER displays selected action, q/Q exits, UP/DOWN scrolls
         if (( HELP_MODE == 1 )); then
             case "$key" in
-                ESC|h|H)
-                    HELP_MODE=0
-                    printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
-                    ;;
                 q|Q)
                     break
+                    ;;
+                UP)
+                    if (( HELP_SCROLL_OFFSET > 0 )); then
+                        (( HELP_SCROLL_OFFSET-- ))
+                        need_redraw=1
+                    else
+                        need_redraw=0
+                    fi
+                    ;;
+                DOWN)
+                    local available_rows=$(( TERM_LINES - 15 ))
+                    (( available_rows < 5 ))  && available_rows=5
+                    (( available_rows > 15 )) && available_rows=15
+                    local max_scroll=$(( ${#CHEAT_LINES[@]} - available_rows ))
+                    (( max_scroll < 0 )) && max_scroll=0
+                    if (( HELP_SCROLL_OFFSET < max_scroll )); then
+                        (( HELP_SCROLL_OFFSET++ ))
+                        need_redraw=1
+                    else
+                        need_redraw=0
+                    fi
+                    ;;
+                LEFT)
+                    case "$SYS_BTN" in
+                        4) SYS_BTN=3; need_redraw=1 ;;
+                        3) SYS_BTN=1; need_redraw=1 ;;
+                        2) SYS_BTN=1; need_redraw=1 ;;
+                        1) SYS_BTN=0; need_redraw=1 ;;
+                        0) need_redraw=0 ;;
+                        *) SYS_BTN=0; need_redraw=1 ;;
+                    esac
+                    ;;
+                RIGHT)
+                    case "$SYS_BTN" in
+                        0) SYS_BTN=1; need_redraw=1 ;;
+                        1) SYS_BTN=3; need_redraw=1 ;;
+                        2) SYS_BTN=3; need_redraw=1 ;;
+                        3) SYS_BTN=4; need_redraw=1 ;;
+                        4) need_redraw=0 ;;
+                        *) SYS_BTN=4; need_redraw=1 ;;
+                    esac
+                    ;;
+                ENTER)
+                    case "$SYS_BTN" in
+                        0)
+                            HELP_MODE=0
+                            CURRENT_VIEW="services"
+                            FOCUS_AREA="services"
+                            refresh_data
+                            CURRENT_STATUS="Status: Services view active. Systemd cache refreshed."
+                            printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
+                            need_redraw=1
+                            ;;
+                        1)
+                            HELP_MODE=0
+                            CURRENT_VIEW="scripts"
+                            FOCUS_AREA="services"
+                            load_scripts
+                            CURRENT_STATUS="Status: Scripts view active."
+                            printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
+                            need_redraw=1
+                            ;;
+                        3)
+                            HELP_MODE=0
+                            FOCUS_AREA="services"
+                            action_clear_config_logs
+                            printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
+                            need_redraw=1
+                            ;;
+                        4)
+                            HELP_SCROLL_OFFSET=0
+                            printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
+                            need_redraw=1
+                            ;;
+                        *)
+                            need_redraw=0
+                            ;;
+                    esac
+                    ;;
+                *)
+                    need_redraw=0
                     ;;
             esac
             continue
         fi
+
+        # Normal Navigation Mode
+        need_redraw=1
 
         case "$key" in
             q|Q)
@@ -134,6 +218,8 @@ main() {
                 ;;
             h|H)
                 HELP_MODE=1
+                HELP_SCROLL_OFFSET=0
+                SYS_BTN=4
                 printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
                 ;;
             c|C)
@@ -280,6 +366,8 @@ main() {
                             ;;
                         4)
                             HELP_MODE=1
+                            HELP_SCROLL_OFFSET=0
+                            SYS_BTN=4
                             printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
                             ;;
                     esac

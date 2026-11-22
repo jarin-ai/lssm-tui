@@ -27,6 +27,7 @@ SELECTED_BTN=0            # 0: [action1], 1: [restart], 2: [action2]
 SCROLL_OFFSET=0           # Viewport scrolling offset
 INFO_MODE=0               # 0: Description, 1: Live CPU/Memory
 HELP_MODE=0               # 0: Normal service list, 1: Keybinding cheat sheet
+HELP_SCROLL_OFFSET=0      # Scrolling offset for keybinding cheat sheet
 SEARCH_MODE=0             # 0: Idle, 1: Active query typing
 SEARCH_QUERY=""           # Current search string
 CURRENT_STATUS="Status: Ready." # Execution result status message

@@ -8,7 +8,7 @@ get_hint_text() {
         return
     fi
     if (( HELP_MODE == 1 )); then
-        echo "Press [h] or [ESC] to exit cheat sheet and return."
+        echo "[←/→] Select action. [Enter] Display. [↑/↓] Scroll. [q/Q] Exit."
         return
     fi
     if [[ "$FOCUS_AREA" == "system" ]]; then
@@ -70,31 +70,66 @@ get_hint_text() {
     esac
 }
 
-render_cheat_sheet() {
-    local cheat_lines=(
-        "  KEYBOARD SHORTCUT CHEAT SHEET"
-        "  ────────────────────────────────────────────────────────────────────────"
-        "  [↑ / ↓]       Navigate rows or switch to system action bar"
-        "  [← / →]       Navigate action buttons across highlighted row"
-        "  [Enter]       Execute highlighted action (run script / service action)"
-        "  [g / Home]    Jump to system action bar (top command line)"
-        "  [a / A]       Add: add script to config (scripts) / pin service (services)"
-        "  [x / X]       Remove: remove script (scripts) / unpin service (services)"
-        "  [s / S]       Switch to User Scripts view"
-        "  [t / T]       Switch to Services view / refresh services"
-        "  [/]           Enter Search Mode (filters items by name and path/description)"
-        "  [h / H]       Toggle this keybinding cheat sheet"
-        "  [c / C]       Clear config and audit logs (prompts confirmation)"
-        "  [d / D]       Toggle Information Area (Description <-> CPU/Memory/PID)"
-        "  [l / L]       Open journalctl log viewer modal (services view)"
-        "  [i / I]       Open systemctl status inspection modal (services view)"
-        "  [r / R]       Manually refresh status cache / reload scripts"
-        "  [ESC]         Exit active search / close cheat sheet / cancel filter"
-        "  [q / Q]       Cleanly exit service manager"
-    )
-    for cline in "${cheat_lines[@]}"; do
-        print_box_line "$cline" "$COLOR_SECONDARY"
+readonly CHEAT_LINES=(
+    "  [↑ / ↓]       Navigate rows or switch to system action bar"
+    "  [← / →]       Navigate action buttons across highlighted row"
+    "  [Enter]       Execute highlighted action (run script / service action)"
+    "  [g / Home]    Jump to system action bar (top command line)"
+    "  [a / A]       Add: add script to config (scripts) / pin service (services)"
+    "  [x / X]       Remove: remove script (scripts) / unpin service (services)"
+    "  [s / S]       Switch to User Scripts view"
+    "  [t / T]       Switch to Services view / refresh services"
+    "  [/]           Enter Search Mode (filters items by name and path/description)"
+    "  [h / H]       Open keybinding cheat sheet view"
+    "  [c / C]       Clear config and audit logs (prompts confirmation)"
+    "  [d / D]       Toggle Information Area (Description <-> CPU/Memory/PID)"
+    "  [l / L]       Open journalctl log viewer modal (services view)"
+    "  [i / I]       Open systemctl status inspection modal (services view)"
+    "  [r / R]       Manually refresh status cache / reload scripts"
+    "  [ESC]         Exit active search / clear filter"
+    "  [q / Q]       Cleanly exit service manager"
+)
+
+_draw_help() {
+    local available_rows="$1"
+
+    # Header Row
+    local p_hdr_key p_hdr_action
+    printf -v p_hdr_key    "%-16.16s" "KEYBINDING"
+    printf -v p_hdr_action "%-56.56s" "ACTION / DESCRIPTION"
+
+    local hdr_content="  ${p_hdr_key} ${p_hdr_action} "
+    print_box_line "$hdr_content" "$COLOR_SECONDARY$COLOR_BOLD"
+
+    local total_lines=${#CHEAT_LINES[@]}
+    local max_scroll=$(( total_lines - available_rows ))
+    (( max_scroll < 0 )) && max_scroll=0
+
+    if (( HELP_SCROLL_OFFSET < 0 )); then
+        HELP_SCROLL_OFFSET=0
+    elif (( HELP_SCROLL_OFFSET > max_scroll )); then
+        HELP_SCROLL_OFFSET=$max_scroll
+    fi
+
+    local rendered=0
+    local idx=$HELP_SCROLL_OFFSET
+
+    while (( rendered < available_rows )); do
+        if (( idx >= total_lines )); then
+            print_box_line "" "$COLOR_TEXT"
+        else
+            print_box_line "${CHEAT_LINES[$idx]}" "$COLOR_SECONDARY"
+            (( idx++ ))
+        fi
+        (( rendered++ ))
     done
+}
+
+render_cheat_sheet() {
+    local available_rows=$(( TERM_LINES - 15 ))
+    (( available_rows < 5 ))  && available_rows=5
+    (( available_rows > 15 )) && available_rows=15
+    _draw_help "$available_rows"
 }
 
 # Draw an inline separator row between pinned and system sections.
@@ -358,7 +393,7 @@ draw_ui() {
         local btn_clear_style="$COLOR_ACCENT"
         local btn_help_style="$COLOR_ACCENT"
 
-        if [[ "$FOCUS_AREA" == "system" ]]; then
+        if [[ "$FOCUS_AREA" == "system" ]] || (( HELP_MODE == 1 )); then
             (( SYS_BTN == 0 )) && btn_services_style="$COLOR_HIGHLIGHT" || btn_services_style="$COLOR_PRIMARY"
             (( SYS_BTN == 1 )) && btn_scripts_style="$COLOR_HIGHLIGHT"  || btn_scripts_style="$COLOR_PRIMARY"
             (( SYS_BTN == 2 )) && btn_search_style="$COLOR_HIGHLIGHT"   || btn_search_style="$COLOR_PRIMARY"
@@ -394,7 +429,7 @@ draw_ui() {
     (( available_rows > 15 )) && available_rows=15
 
     if (( HELP_MODE == 1 )); then
-        render_cheat_sheet
+        _draw_help "$available_rows"
     elif [[ "$CURRENT_VIEW" == "scripts" ]]; then
         _draw_scripts_list "$available_rows"
     else
@@ -404,39 +439,42 @@ draw_ui() {
     # Divider below Service / Script List Area
     print_box_divider
 
-    # 4. Information Area (Below Main List Area) — hidden when cheat sheet is active
-    if (( HELP_MODE == 0 )); then
-        local info_text=""
-        if [[ "$CURRENT_VIEW" == "scripts" ]]; then
-            if (( ${#VISIBLE_SCRIPTS[@]} > 0 )); then
-                local actual_idx="${VISIBLE_SCRIPTS[$SCRIPTS_ROW]}"
-                local s_name="${SCRIPTS_NAMES[$actual_idx]}"
-                local s_path="${SCRIPTS_PATHS[$actual_idx]}"
-                info_text="  Script: ${s_name} | Path: ${s_path}"
+    # 4. Information Area (Below Main List Area)
+    local info_text=""
+    if (( HELP_MODE == 1 )); then
+        local cur_from=$(( HELP_SCROLL_OFFSET + 1 ))
+        local cur_to=$(( HELP_SCROLL_OFFSET + available_rows ))
+        (( cur_to > ${#CHEAT_LINES[@]} )) && cur_to=${#CHEAT_LINES[@]}
+        info_text="  Information: Keybinding Cheat Sheet (Lines ${cur_from}-${cur_to} of ${#CHEAT_LINES[@]})"
+    elif [[ "$CURRENT_VIEW" == "scripts" ]]; then
+        if (( ${#VISIBLE_SCRIPTS[@]} > 0 )); then
+            local actual_idx="${VISIBLE_SCRIPTS[$SCRIPTS_ROW]}"
+            local s_name="${SCRIPTS_NAMES[$actual_idx]}"
+            local s_path="${SCRIPTS_PATHS[$actual_idx]}"
+            info_text="  Script: ${s_name} | Path: ${s_path}"
+        else
+            info_text="  Information: No script selected (press [a] to add script)"
+        fi
+    else
+        if (( ${#VISIBLE_SERVICES[@]} > 0 )); then
+            local cur_svc="${VISIBLE_SERVICES[$SELECTED_ROW]}"
+            if (( INFO_MODE == 0 )); then
+                info_text="  Description: ${SVC_DESCRIPTION[$cur_svc]:-No description available}"
             else
-                info_text="  Information: No script selected (press [a] to add script)"
+                local cpu_val="${CPU_USAGE[$cur_svc]:-0.0}"
+                local mem_val="${MEM_USAGE[$cur_svc]:-0.0}"
+                local pid_val="${SVC_PID[$cur_svc]:-0}"
+                [[ "$pid_val" == "0" ]] && pid_val="None"
+                info_text="  Resource Usage: CPU: ${cpu_val}% | Memory: ${mem_val} MB | PID: ${pid_val}"
             fi
         else
-            if (( ${#VISIBLE_SERVICES[@]} > 0 )); then
-                local cur_svc="${VISIBLE_SERVICES[$SELECTED_ROW]}"
-                if (( INFO_MODE == 0 )); then
-                    info_text="  Description: ${SVC_DESCRIPTION[$cur_svc]:-No description available}"
-                else
-                    local cpu_val="${CPU_USAGE[$cur_svc]:-0.0}"
-                    local mem_val="${MEM_USAGE[$cur_svc]:-0.0}"
-                    local pid_val="${SVC_PID[$cur_svc]:-0}"
-                    [[ "$pid_val" == "0" ]] && pid_val="None"
-                    info_text="  Resource Usage: CPU: ${cpu_val}% | Memory: ${mem_val} MB | PID: ${pid_val}"
-                fi
-            else
-                info_text="  Information: No service selected"
-            fi
+            info_text="  Information: No service selected"
         fi
-        print_box_line "$info_text" "$COLOR_ACCENT"
-
-        # Divider below Information Area
-        print_box_divider
     fi
+    print_box_line "$info_text" "$COLOR_ACCENT"
+
+    # Divider below Information Area
+    print_box_divider
 
     # 5. Hint Area (Below Information Area)
     local hint_text="  Hint: $(get_hint_text)"
