@@ -55,6 +55,17 @@ main() {
     local need_redraw=1
 
     while true; do
+        # Do not allow losing focus from action bar when a list is empty
+        if [[ "$FOCUS_AREA" == "services" ]]; then
+            if [[ "$CURRENT_VIEW" == "scripts" ]] && (( ${#VISIBLE_SCRIPTS[@]} == 0 )); then
+                FOCUS_AREA="system"
+                SYS_BTN=1
+            elif [[ "$CURRENT_VIEW" == "services" ]] && (( ${#VISIBLE_SERVICES[@]} == 0 )); then
+                FOCUS_AREA="system"
+                SYS_BTN=0
+            fi
+        fi
+
         if (( need_redraw == 1 )); then
             draw_ui
             need_redraw=0
@@ -68,7 +79,17 @@ main() {
             case "$key" in
                 ENTER)
                     SEARCH_MODE=0
-                    FOCUS_AREA="services"
+                    local is_empty=0
+                    if [[ "$CURRENT_VIEW" == "scripts" ]]; then
+                        (( ${#VISIBLE_SCRIPTS[@]} == 0 )) && is_empty=1
+                    else
+                        (( ${#VISIBLE_SERVICES[@]} == 0 )) && is_empty=1
+                    fi
+                    if (( is_empty == 1 )); then
+                        FOCUS_AREA="system"
+                    else
+                        FOCUS_AREA="services"
+                    fi
                     ;;
                 ESC)
                     SEARCH_MODE=0
@@ -105,7 +126,17 @@ main() {
                     ;;
                 TAB)
                     SEARCH_MODE=0
-                    FOCUS_AREA="services"
+                    local is_empty=0
+                    if [[ "$CURRENT_VIEW" == "scripts" ]]; then
+                        (( ${#VISIBLE_SCRIPTS[@]} == 0 )) && is_empty=1
+                    else
+                        (( ${#VISIBLE_SERVICES[@]} == 0 )) && is_empty=1
+                    fi
+                    if (( is_empty == 1 )); then
+                        FOCUS_AREA="system"
+                    else
+                        FOCUS_AREA="services"
+                    fi
                     ;;
                 *)
                     if [[ ${#key} -eq 1 ]]; then
@@ -170,7 +201,7 @@ main() {
                         0)
                             HELP_MODE=0
                             CURRENT_VIEW="services"
-                            FOCUS_AREA="services"
+                            FOCUS_AREA="system"
                             refresh_data
                             CURRENT_STATUS="Status: Services view active. Systemd cache refreshed."
                             printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
@@ -179,7 +210,7 @@ main() {
                         1)
                             HELP_MODE=0
                             CURRENT_VIEW="scripts"
-                            FOCUS_AREA="services"
+                            FOCUS_AREA="system"
                             load_scripts
                             CURRENT_STATUS="Status: Scripts view active."
                             printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
@@ -187,13 +218,14 @@ main() {
                             ;;
                         3)
                             HELP_MODE=0
-                            FOCUS_AREA="services"
+                            FOCUS_AREA="system"
                             action_clear_config_logs
                             printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
                             need_redraw=1
                             ;;
                         4)
                             HELP_SCROLL_OFFSET=0
+                            FOCUS_AREA="system"
                             printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
                             need_redraw=1
                             ;;
@@ -220,6 +252,7 @@ main() {
                 HELP_MODE=1
                 HELP_SCROLL_OFFSET=0
                 SYS_BTN=4
+                FOCUS_AREA="system"
                 printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
                 ;;
             c|C)
@@ -263,25 +296,62 @@ main() {
                     filter_scripts
                     CURRENT_STATUS="Status: Search filter cleared."
                 elif [[ "$FOCUS_AREA" == "system" ]]; then
-                    FOCUS_AREA="services"
+                    local is_empty=0
+                    if [[ "$CURRENT_VIEW" == "scripts" ]]; then
+                        (( ${#VISIBLE_SCRIPTS[@]} == 0 )) && is_empty=1
+                    else
+                        (( ${#VISIBLE_SERVICES[@]} == 0 )) && is_empty=1
+                    fi
+                    if (( is_empty == 0 )); then
+                        FOCUS_AREA="services"
+                    else
+                        need_redraw=0
+                    fi
                 fi
                 ;;
             TAB)
+                local is_empty=0
+                if [[ "$CURRENT_VIEW" == "scripts" ]]; then
+                    (( ${#VISIBLE_SCRIPTS[@]} == 0 )) && is_empty=1
+                else
+                    (( ${#VISIBLE_SERVICES[@]} == 0 )) && is_empty=1
+                fi
+
                 if [[ "$FOCUS_AREA" == "services" ]]; then
                     FOCUS_AREA="system"
-                else
+                elif (( is_empty == 0 )); then
                     FOCUS_AREA="services"
+                else
+                    need_redraw=0
                 fi
                 ;;
             BTAB)
+                local is_empty=0
+                if [[ "$CURRENT_VIEW" == "scripts" ]]; then
+                    (( ${#VISIBLE_SCRIPTS[@]} == 0 )) && is_empty=1
+                else
+                    (( ${#VISIBLE_SERVICES[@]} == 0 )) && is_empty=1
+                fi
+
                 if [[ "$FOCUS_AREA" == "services" ]]; then
                     FOCUS_AREA="system"
-                else
+                elif (( is_empty == 0 )); then
                     FOCUS_AREA="services"
+                else
+                    need_redraw=0
                 fi
                 ;;
             UP)
-                if [[ "$FOCUS_AREA" == "services" ]]; then
+                local is_empty=0
+                if [[ "$CURRENT_VIEW" == "scripts" ]]; then
+                    (( ${#VISIBLE_SCRIPTS[@]} == 0 )) && is_empty=1
+                else
+                    (( ${#VISIBLE_SERVICES[@]} == 0 )) && is_empty=1
+                fi
+
+                if (( is_empty == 1 )); then
+                    need_redraw=0
+                elif [[ "$FOCUS_AREA" == "services" ]]; then
                     if [[ "$CURRENT_VIEW" == "scripts" ]]; then
                         if (( SCRIPTS_ROW > 0 )); then
                             (( SCRIPTS_ROW-- ))
@@ -300,7 +370,16 @@ main() {
                 fi
                 ;;
             DOWN)
-                if [[ "$FOCUS_AREA" == "system" ]]; then
+                local is_empty=0
+                if [[ "$CURRENT_VIEW" == "scripts" ]]; then
+                    (( ${#VISIBLE_SCRIPTS[@]} == 0 )) && is_empty=1
+                else
+                    (( ${#VISIBLE_SERVICES[@]} == 0 )) && is_empty=1
+                fi
+
+                if (( is_empty == 1 )); then
+                    need_redraw=0
+                elif [[ "$FOCUS_AREA" == "system" ]]; then
                     FOCUS_AREA="services"
                 elif [[ "$FOCUS_AREA" == "services" ]]; then
                     if [[ "$CURRENT_VIEW" == "scripts" ]]; then
@@ -368,6 +447,7 @@ main() {
                             HELP_MODE=1
                             HELP_SCROLL_OFFSET=0
                             SYS_BTN=4
+                            FOCUS_AREA="system"
                             printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
                             ;;
                     esac

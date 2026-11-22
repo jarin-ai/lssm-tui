@@ -7,11 +7,7 @@ get_hint_text() {
         echo "Type query. Press [Enter] to finish search, [ESC] to cancel filter."
         return
     fi
-    if (( HELP_MODE == 1 )); then
-        echo "[←/→] Select action. [Enter] Display. [↑/↓] Scroll. [q/Q] Exit."
-        return
-    fi
-    if [[ "$FOCUS_AREA" == "system" ]]; then
+    if [[ "$FOCUS_AREA" == "system" ]] || (( HELP_MODE == 1 )); then
         case "$SYS_BTN" in
             0) echo "Press [Enter] to switch to services view (or press 't')." ;;
             1) echo "Press [Enter] to switch to user scripts view (or press 's')." ;;
@@ -407,8 +403,9 @@ draw_ui() {
             fi
         fi
 
-        # Plain char counts: "  Actions:  [services]  [scripts]  [search]  [clear]  [help]" = 61
-        local plain_len=61
+        # Plain char counts: "  Actions:  [services]  [scripts]  [search]  [clear]  [help]" = 60
+        local plain_text="  Actions:  [services]  [scripts]  [search]  [clear]  [help]"
+        local plain_len=${#plain_text}
         local pad_sys_len=$(( INNER_WIDTH - plain_len ))
         local pad_sys
         printf -v pad_sys "%*s" "$pad_sys_len" ""
