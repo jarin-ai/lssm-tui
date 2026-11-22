@@ -120,12 +120,14 @@ action_clear_config_logs() {
     fi
 
     rm -f "$CONFIG_FILE" 2>/dev/null || true
+    rm -f "$SCRIPTS_CONFIG_FILE" 2>/dev/null || true
 
     if (( FLAG_NO_LOG == 0 )); then
         rm -f "$LOG_FILE" 2>/dev/null || true
     fi
 
     load_services
+    load_scripts
     refresh_data
     CURRENT_STATUS="Status: Config and log files deleted. Defaults re-initialized."
     audit_log "CLEAR" "CONFIG_AND_LOGS" "SUCCESS" "Deleted config and logs, reset to defaults"

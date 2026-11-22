@@ -13,9 +13,12 @@ declare -A SVC_PID
 declare -A CPU_USAGE
 declare -A MEM_USAGE
 
-SCRIPTS_NAMES=()           # Basenames (no .sh) of discovered scripts
-SCRIPTS_DESCS=()           # First-comment descriptions, parallel to SCRIPTS_NAMES
-SCRIPTS_ROW=0              # Selected row in scripts modal
+CURRENT_VIEW="services"   # "services" or "scripts"
+SCRIPTS_NAMES=()          # Script names defined in scripts.conf
+SCRIPTS_PATHS=()          # Paths to .sh files, parallel to SCRIPTS_NAMES
+VISIBLE_SCRIPTS=()        # Indices of scripts matching search query
+SCRIPTS_ROW=0             # Selected row in scripts view
+SCRIPTS_SCROLL_OFFSET=0   # Viewport scrolling offset for scripts
 
 FOCUS_AREA="services"      # "services" or "system"
 SYS_BTN=0                 # 0: [services], 1: [scripts], 2: [search], 3: [clear], 4: [help]

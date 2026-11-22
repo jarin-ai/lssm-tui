@@ -19,9 +19,9 @@ source "${SCRIPT_DIR}/source.d/03_terminal.sh"     # Terminal helpers, cleanup t
 source "${SCRIPT_DIR}/source.d/04_data.sh"         # load_services, filter_services, refresh_data
 source "${SCRIPT_DIR}/source.d/05_ui_helpers.sh"   # print_box_* frame drawing helpers
 source "${SCRIPT_DIR}/source.d/06_modals.sh"       # Modals, prompts & service actions
+source "${SCRIPT_DIR}/source.d/09_scripts.sh"     # load_scripts, add_script_prompt, _run_script
 source "${SCRIPT_DIR}/source.d/07_draw.sh"         # get_hint_text, render_cheat_sheet, draw_ui
 source "${SCRIPT_DIR}/source.d/08_input.sh"        # read_key, handle_resize, WINCH trap
-source "${SCRIPT_DIR}/source.d/09_scripts.sh"     # load_scripts, show_scripts_modal
 
 # ==============================================================================
 # MAIN ENTRY POINT
@@ -45,6 +45,7 @@ main() {
     TERM_LINES=$(tput lines 2>/dev/null || echo 24)
 
     load_services
+    load_scripts
     refresh_data
     CURRENT_STATUS="Status: Ready."
 
@@ -67,19 +68,33 @@ main() {
                     SEARCH_MODE=0
                     SEARCH_QUERY=""
                     filter_services
+                    filter_scripts
                     ;;
                 BACKSPACE)
                     SEARCH_QUERY="${SEARCH_QUERY%?}"
                     filter_services
+                    filter_scripts
                     ;;
                 UP)
-                    if (( SELECTED_ROW > 0 )); then
-                        (( SELECTED_ROW-- ))
+                    if [[ "$CURRENT_VIEW" == "scripts" ]]; then
+                        if (( SCRIPTS_ROW > 0 )); then
+                            (( SCRIPTS_ROW-- ))
+                        fi
+                    else
+                        if (( SELECTED_ROW > 0 )); then
+                            (( SELECTED_ROW-- ))
+                        fi
                     fi
                     ;;
                 DOWN)
-                    if (( SELECTED_ROW < ${#VISIBLE_SERVICES[@]} - 1 )); then
-                        (( SELECTED_ROW++ ))
+                    if [[ "$CURRENT_VIEW" == "scripts" ]]; then
+                        if (( SCRIPTS_ROW < ${#VISIBLE_SCRIPTS[@]} - 1 )); then
+                            (( SCRIPTS_ROW++ ))
+                        fi
+                    else
+                        if (( SELECTED_ROW < ${#VISIBLE_SERVICES[@]} - 1 )); then
+                            (( SELECTED_ROW++ ))
+                        fi
                     fi
                     ;;
                 TAB)
@@ -90,6 +105,7 @@ main() {
                     if [[ ${#key} -eq 1 ]]; then
                         SEARCH_QUERY+="$key"
                         filter_services
+                        filter_scripts
                     fi
                     ;;
             esac
@@ -128,18 +144,23 @@ main() {
                 INFO_MODE=$(( 1 - INFO_MODE ))
                 ;;
             r|R)
-                refresh_data
-                CURRENT_STATUS="Status: Systemd cache and process metrics refreshed."
+                if [[ "$CURRENT_VIEW" == "scripts" ]]; then
+                    load_scripts
+                    CURRENT_STATUS="Status: Scripts configuration refreshed."
+                else
+                    refresh_data
+                    CURRENT_STATUS="Status: Systemd cache and process metrics refreshed."
+                fi
                 ;;
             l|L)
-                if (( ${#VISIBLE_SERVICES[@]} > 0 )); then
+                if [[ "$CURRENT_VIEW" == "services" ]] && (( ${#VISIBLE_SERVICES[@]} > 0 )); then
                     local target_svc="${VISIBLE_SERVICES[$SELECTED_ROW]}"
                     show_log_modal "$target_svc"
                     printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
                 fi
                 ;;
             i|I)
-                if (( ${#VISIBLE_SERVICES[@]} > 0 )); then
+                if [[ "$CURRENT_VIEW" == "services" ]] && (( ${#VISIBLE_SERVICES[@]} > 0 )); then
                     local target_svc="${VISIBLE_SERVICES[$SELECTED_ROW]}"
                     show_status_modal "$target_svc"
                     printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
@@ -153,6 +174,7 @@ main() {
                 if [[ -n "$SEARCH_QUERY" ]]; then
                     SEARCH_QUERY=""
                     filter_services
+                    filter_scripts
                     CURRENT_STATUS="Status: Search filter cleared."
                 elif [[ "$FOCUS_AREA" == "system" ]]; then
                     FOCUS_AREA="services"
@@ -174,11 +196,20 @@ main() {
                 ;;
             UP)
                 if [[ "$FOCUS_AREA" == "services" ]]; then
-                    if (( SELECTED_ROW > 0 )); then
-                        (( SELECTED_ROW-- ))
+                    if [[ "$CURRENT_VIEW" == "scripts" ]]; then
+                        if (( SCRIPTS_ROW > 0 )); then
+                            (( SCRIPTS_ROW-- ))
+                        else
+                            FOCUS_AREA="system"
+                            SYS_BTN=1
+                        fi
                     else
-                        FOCUS_AREA="system"
-                        SYS_BTN=0
+                        if (( SELECTED_ROW > 0 )); then
+                            (( SELECTED_ROW-- ))
+                        else
+                            FOCUS_AREA="system"
+                            SYS_BTN=0
+                        fi
                     fi
                 fi
                 ;;
@@ -186,14 +217,24 @@ main() {
                 if [[ "$FOCUS_AREA" == "system" ]]; then
                     FOCUS_AREA="services"
                 elif [[ "$FOCUS_AREA" == "services" ]]; then
-                    if (( SELECTED_ROW < ${#VISIBLE_SERVICES[@]} - 1 )); then
-                        (( SELECTED_ROW++ ))
+                    if [[ "$CURRENT_VIEW" == "scripts" ]]; then
+                        if (( SCRIPTS_ROW < ${#VISIBLE_SCRIPTS[@]} - 1 )); then
+                            (( SCRIPTS_ROW++ ))
+                        fi
+                    else
+                        if (( SELECTED_ROW < ${#VISIBLE_SERVICES[@]} - 1 )); then
+                            (( SELECTED_ROW++ ))
+                        fi
                     fi
                 fi
                 ;;
             g|G|HOME)
                 FOCUS_AREA="system"
-                SYS_BTN=0
+                if [[ "$CURRENT_VIEW" == "scripts" ]]; then
+                    SYS_BTN=1
+                else
+                    SYS_BTN=0
+                fi
                 ;;
             LEFT)
                 if [[ "$FOCUS_AREA" == "system" ]]; then
@@ -211,7 +252,6 @@ main() {
                     if (( SYS_BTN < 4 )); then
                         (( SYS_BTN++ ))
                     fi
-
                 elif [[ "$FOCUS_AREA" == "services" ]]; then
                     if (( SELECTED_BTN < 2 )); then
                         (( SELECTED_BTN++ ))
@@ -222,12 +262,14 @@ main() {
                 if [[ "$FOCUS_AREA" == "system" ]]; then
                     case "$SYS_BTN" in
                         0)
+                            CURRENT_VIEW="services"
                             refresh_data
-                            CURRENT_STATUS="Status: Systemd cache and process metrics refreshed."
+                            CURRENT_STATUS="Status: Services view active. Systemd cache refreshed."
                             ;;
                         1)
-                            show_scripts_modal
-                            printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
+                            CURRENT_VIEW="scripts"
+                            load_scripts
+                            CURRENT_STATUS="Status: Scripts view active."
                             ;;
                         2)
                             SEARCH_MODE=1
@@ -242,60 +284,92 @@ main() {
                             ;;
                     esac
                 elif [[ "$FOCUS_AREA" == "services" ]]; then
-                    if (( ${#VISIBLE_SERVICES[@]} > 0 )); then
-                        local svc="${VISIBLE_SERVICES[$SELECTED_ROW]}"
-                        local a_state="${SVC_ACTIVE_STATE[$svc]:-unknown}"
-                        local u_state="${SVC_UNIT_STATE[$svc]:-unknown}"
+                    if [[ "$CURRENT_VIEW" == "scripts" ]]; then
+                        if (( ${#VISIBLE_SCRIPTS[@]} > 0 )); then
+                            local s_idx="${VISIBLE_SCRIPTS[$SCRIPTS_ROW]}"
+                            _run_script "${SCRIPTS_NAMES[$s_idx]}" "${SCRIPTS_PATHS[$s_idx]}"
+                            printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
+                        fi
+                    else
+                        if (( ${#VISIBLE_SERVICES[@]} > 0 )); then
+                            local svc="${VISIBLE_SERVICES[$SELECTED_ROW]}"
+                            local a_state="${SVC_ACTIVE_STATE[$svc]:-unknown}"
+                            local u_state="${SVC_UNIT_STATE[$svc]:-unknown}"
 
-                        case "$SELECTED_BTN" in
-                            0)
-                                if [[ "$a_state" == "active" ]]; then
-                                    execute_service_action "$svc" "stop"
-                                else
-                                    execute_service_action "$svc" "start"
-                                fi
-                                printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
-                                ;;
-                            1)
-                                execute_service_action "$svc" "restart"
-                                printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
-                                ;;
-                            2)
-                                if [[ "$u_state" == "enabled" ]]; then
-                                    execute_service_action "$svc" "disable"
-                                else
-                                    execute_service_action "$svc" "enable"
-                                fi
-                                printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
-                                ;;
-                        esac
+                            case "$SELECTED_BTN" in
+                                0)
+                                    if [[ "$a_state" == "active" ]]; then
+                                        execute_service_action "$svc" "stop"
+                                    else
+                                        execute_service_action "$svc" "start"
+                                    fi
+                                    printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
+                                    ;;
+                                1)
+                                    execute_service_action "$svc" "restart"
+                                    printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
+                                    ;;
+                                2)
+                                    if [[ "$u_state" == "enabled" ]]; then
+                                        execute_service_action "$svc" "disable"
+                                    else
+                                        execute_service_action "$svc" "enable"
+                                    fi
+                                    printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
+                                    ;;
+                            esac
+                        fi
                     fi
                 fi
                 ;;
             t|T)
+                CURRENT_VIEW="services"
                 refresh_data
-                CURRENT_STATUS="Status: Systemd cache and process metrics refreshed."
+                CURRENT_STATUS="Status: Services view active. Systemd cache refreshed."
                 ;;
             s|S)
-                show_scripts_modal
-                printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
+                if [[ "$CURRENT_VIEW" == "scripts" ]]; then
+                    CURRENT_VIEW="services"
+                    refresh_data
+                    CURRENT_STATUS="Status: Services view active. Systemd cache refreshed."
+                else
+                    CURRENT_VIEW="scripts"
+                    load_scripts
+                    CURRENT_STATUS="Status: Scripts view active."
+                fi
                 ;;
             a|A)
-                if (( ${#VISIBLE_SERVICES[@]} > 0 )); then
-                    local target_svc="${VISIBLE_SERVICES[$SELECTED_ROW]}"
-                    add_to_user_config "$target_svc"
-                    filter_services
+                if [[ "$CURRENT_VIEW" == "scripts" ]]; then
+                    add_script_prompt
+                    printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
+                else
+                    if (( ${#VISIBLE_SERVICES[@]} > 0 )); then
+                        local target_svc="${VISIBLE_SERVICES[$SELECTED_ROW]}"
+                        add_to_user_config "$target_svc"
+                        filter_services
+                    fi
                 fi
                 ;;
             x|X)
-                if (( ${#VISIBLE_SERVICES[@]} > 0 )); then
-                    local target_svc="${VISIBLE_SERVICES[$SELECTED_ROW]}"
-                    remove_from_user_config "$target_svc"
-                    # Clamp cursor after removal
-                    if (( SELECTED_ROW >= ${#VISIBLE_SERVICES[@]} )) && (( ${#VISIBLE_SERVICES[@]} > 0 )); then
-                        SELECTED_ROW=$(( ${#VISIBLE_SERVICES[@]} - 1 ))
+                if [[ "$CURRENT_VIEW" == "scripts" ]]; then
+                    if (( ${#VISIBLE_SCRIPTS[@]} > 0 )); then
+                        local s_idx="${VISIBLE_SCRIPTS[$SCRIPTS_ROW]}"
+                        local target_name="${SCRIPTS_NAMES[$s_idx]}"
+                        remove_script_from_config "$target_name"
+                        if (( SCRIPTS_ROW >= ${#VISIBLE_SCRIPTS[@]} )) && (( ${#VISIBLE_SCRIPTS[@]} > 0 )); then
+                            SCRIPTS_ROW=$(( ${#VISIBLE_SCRIPTS[@]} - 1 ))
+                        fi
                     fi
-                    filter_services
+                else
+                    if (( ${#VISIBLE_SERVICES[@]} > 0 )); then
+                        local target_svc="${VISIBLE_SERVICES[$SELECTED_ROW]}"
+                        remove_from_user_config "$target_svc"
+                        # Clamp cursor after removal
+                        if (( SELECTED_ROW >= ${#VISIBLE_SERVICES[@]} )) && (( ${#VISIBLE_SERVICES[@]} > 0 )); then
+                            SELECTED_ROW=$(( ${#VISIBLE_SERVICES[@]} - 1 ))
+                        fi
+                        filter_services
+                    fi
                 fi
                 ;;
         esac
