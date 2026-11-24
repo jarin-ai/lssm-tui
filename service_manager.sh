@@ -34,20 +34,14 @@ main() {
         exit 1
     fi
 
-    # Save initial terminal state
-    SAVED_TTY_SETTINGS=$(stty -g 2>/dev/null || true)
-
-    # 3. Non-Canonical Terminal Input: Preserve newline translation
-    stty -icanon -echo min 1 time 0 2>/dev/null || true
-    printf '%s' "$TERM_CURSOR_HIDE"
-
-    TERM_COLS=$(tput cols 2>/dev/null || echo 80)
-    TERM_LINES=$(tput lines 2>/dev/null || echo 24)
-
     load_services
     load_scripts
     refresh_data
     CURRENT_STATUS="Status: Ready."
+
+    # Enter alternate screen buffer and configure raw terminal only after
+    # CLI parsing and pre-flight checks pass, right before the TUI loop.
+    enter_tui_mode
 
     # Initial Screen Clear
     printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"

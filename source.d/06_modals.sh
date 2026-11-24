@@ -59,7 +59,7 @@ _view_status_modal() {
     print_box_line "  Systemctl Status Inspection: ${svc}" "$COLOR_TITLE$COLOR_BOLD"
     print_box_divider
 
-    systemctl status "$svc" 2>&1 || true
+    systemctl status "$svc" --no-pager 2>&1 || true
 
     printf '\n'
     print_box_divider

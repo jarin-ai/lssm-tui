@@ -45,7 +45,9 @@ read_key() {
 handle_resize() {
     TERM_COLS=$(tput cols 2>/dev/null || echo 80)
     TERM_LINES=$(tput lines 2>/dev/null || echo 24)
-    printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
-    draw_ui
+    if (( ${_TUI_ALT_SCREEN_ACTIVE:-0} == 1 )); then
+        printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
+        draw_ui
+    fi
 }
 trap handle_resize WINCH
