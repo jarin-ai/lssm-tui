@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# service_manager.sh - Production-grade Systemd Service Manager TUI
-# Target: Linux Mint & systemd-based Linux distributions
+# service_manager.sh - Systemd Service and Scripts Manager TUI
+# Target: systemd-based Linux distributions
 # ==============================================================================
 
 set -u

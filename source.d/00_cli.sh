@@ -12,8 +12,8 @@ show_help() {
     cat << 'EOF'
 Usage: service_manager.sh [OPTIONS]
 
-Production-grade interactive Terminal User Interface (TUI) to monitor,
-manage, inspect, and log systemd services on Linux Mint and modern Linux.
+Interactive Terminal User Interface (TUI) to monitor, manage, inspect, and log
+systemd services and manage, and run user scripts on modern Linux.
 
 Options:
   --help                  Display this help documentation and exit immediately.
