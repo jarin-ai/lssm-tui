@@ -1,76 +1,89 @@
+# shellcheck shell=bash
 # ==============================================================================
-# KEYBINDINGS & CONTROL LOGIC
+# KEYBOARD INPUT DECODING & RESIZE HANDLING
 # ==============================================================================
 
-read_key() {
-    local k=""
-    IFS= read -rsn1 k || return 1
-    if [[ "$k" == $'\x1b' ]]; then
-        local seq=""
-        IFS= read -rsn1 -t 0.05 seq || true
-        if [[ -z "$seq" ]]; then
-            echo "ESC"
+# Read and decode a single key or ANSI escape sequence into a nameref variable.
+# Inputs: $1=nameref to output key string
+# Outputs: sets referenced variable to decoded key token
+# Returns: 0 on success, 1 on EOF/read failure
+input__read_key() {
+    local -n _irk_out="$1"
+    local _irk_k=""
+    IFS= read -rsn1 _irk_k || return 1
+
+    if [[ "$_irk_k" == $'\x1b' ]]; then
+        local _irk_seq=""
+        IFS= read -rsn1 -t 0.05 _irk_seq || true
+        if [[ -z "$_irk_seq" ]]; then
+            _irk_out="ESC"
             return 0
         fi
-        if [[ "$seq" == "[" ]]; then
-            local code=""
-            IFS= read -rsn1 -t 0.05 code || true
-            case "$code" in
-                A) echo "UP"; return 0 ;;
-                B) echo "DOWN"; return 0 ;;
-                C) echo "RIGHT"; return 0 ;;
-                D) echo "LEFT"; return 0 ;;
-                H) echo "HOME"; return 0 ;;
-                F) echo "END"; return 0 ;;
-                Z) echo "IGNORE"; return 0 ;;
+        if [[ "$_irk_seq" == "[" ]]; then
+            local _irk_code=""
+            IFS= read -rsn1 -t 0.05 _irk_code || true
+            case "$_irk_code" in
+                A) _irk_out="UP" ;;
+                B) _irk_out="DOWN" ;;
+                C) _irk_out="RIGHT" ;;
+                D) _irk_out="LEFT" ;;
+                H) _irk_out="HOME" ;;
+                F) _irk_out="END" ;;
+                Z) _irk_out="IGNORE" ;;
                 1|4|7|8)
-                    local tilde=""
-                    IFS= read -rsn1 -t 0.05 tilde || true
-                    if [[ "$tilde" == "~" ]]; then
-                        case "$code" in
-                            1|7) echo "HOME"; return 0 ;;
-                            4|8) echo "END"; return 0 ;;
+                    local _irk_tilde=""
+                    IFS= read -rsn1 -t 0.05 _irk_tilde || true
+                    if [[ "$_irk_tilde" == "~" ]]; then
+                        case "$_irk_code" in
+                            1|7) _irk_out="HOME" ;;
+                            4|8) _irk_out="END" ;;
                         esac
+                    else
+                        _irk_out="IGNORE"
                     fi
-                    echo "IGNORE"; return 0 ;;
-                *) echo "ESC"; return 0 ;;
+                    ;;
+                *) _irk_out="ESC" ;;
             esac
-        elif [[ "$seq" == "O" ]]; then
-            local code=""
-            IFS= read -rsn1 -t 0.05 code || true
-            case "$code" in
-                A) echo "UP"; return 0 ;;
-                B) echo "DOWN"; return 0 ;;
-                C) echo "RIGHT"; return 0 ;;
-                D) echo "LEFT"; return 0 ;;
-                H) echo "HOME"; return 0 ;;
-                F) echo "END"; return 0 ;;
-                *) echo "ESC"; return 0 ;;
+            return 0
+        elif [[ "$_irk_seq" == "O" ]]; then
+            local _irk_code=""
+            IFS= read -rsn1 -t 0.05 _irk_code || true
+            case "$_irk_code" in
+                A) _irk_out="UP" ;;
+                B) _irk_out="DOWN" ;;
+                C) _irk_out="RIGHT" ;;
+                D) _irk_out="LEFT" ;;
+                H) _irk_out="HOME" ;;
+                F) _irk_out="END" ;;
+                *) _irk_out="ESC" ;;
             esac
+            return 0
         fi
-        echo "ESC"
+        _irk_out="ESC"
         return 0
-    elif [[ -z "$k" || "$k" == $'\n' || "$k" == $'\r' ]]; then
-        echo "ENTER"
+    elif [[ -z "$_irk_k" || "$_irk_k" == $'\n' || "$_irk_k" == $'\r' ]]; then
+        _irk_out="ENTER"
         return 0
-    elif [[ "$k" == $'\t' ]]; then
-        echo "TAB"
+    elif [[ "$_irk_k" == $'\t' ]]; then
+        _irk_out="TAB"
         return 0
-    elif [[ "$k" == $'\x7f' || "$k" == $'\x08' ]]; then
-        echo "BACKSPACE"
+    elif [[ "$_irk_k" == $'\x7f' || "$_irk_k" == $'\x08' ]]; then
+        _irk_out="BACKSPACE"
         return 0
     else
-        echo "$k"
+        _irk_out="$_irk_k"
         return 0
     fi
 }
 
-handle_resize() {
-    TERM_COLS=$(tput cols 2>/dev/null || echo 80)
-    TERM_LINES=$(tput lines 2>/dev/null || echo 24)
-    if (( ${_TUI_ALT_SCREEN_ACTIVE:-0} == 1 )); then
+# SIGWINCH handler: refresh terminal dimensions and redraw active TUI frame.
+# Inputs: none
+# Outputs: redraws TUI if alternate screen is active
+# Returns: 0
+input__handle_resize() {
+    term__refresh_size
+    if term__is_alt_screen_active; then
         printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
-        draw_ui
+        draw__ui
     fi
 }
-trap handle_resize WINCH

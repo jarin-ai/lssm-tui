@@ -1,23 +1,26 @@
+# shellcheck shell=bash
 # ==============================================================================
 # USER SCRIPTS MANAGER & RUNNER
-# Scripts are stored as name=path in SCRIPTS_CONFIG_FILE (defined in 01_constants.sh).
-# Located in the same directory as services.conf (e.g. ~/.config/service_manager/scripts.conf).
+# Scripts are stored as name=path in SCRIPTS_CONFIG_FILE.
 # ==============================================================================
 
-load_scripts() {
-    SCRIPTS_NAMES=()
-    SCRIPTS_PATHS=()
+# Load script entries from SCRIPTS_CONFIG_FILE and apply current search filter.
+# Inputs: none (reads SCRIPTS_CONFIG_FILE)
+# Outputs: populates STATE_SCRIPTS_NAMES, STATE_SCRIPTS_PATHS, STATE_VISIBLE_SCRIPTS
+# Returns: 0
+scripts__load() {
+    STATE_SCRIPTS_NAMES=()
+    STATE_SCRIPTS_PATHS=()
 
     if [[ ! -f "$SCRIPTS_CONFIG_FILE" ]]; then
-        filter_scripts
+        scripts__filter
         return 0
     fi
 
-    local line name path
+    local line="" name="" path=""
     while IFS= read -r line || [[ -n "$line" ]]; do
-        line="${line#"${line%%[![:space:]]*}"}"
-        line="${line%"${line##*[![:space:]]}"}"
-        [[ -z "$line" || "$line" =~ ^# ]] && continue
+        util__trim line
+        [[ -z "$line" || "$line" == \#* ]] && continue
 
         if [[ "$line" == *"="* ]]; then
             name="${line%%=*}"
@@ -29,207 +32,224 @@ load_scripts() {
             continue
         fi
 
-        # Strip surrounding whitespace
-        name="${name#"${name%%[![:space:]]*}"}"
-        name="${name%"${name##*[![:space:]]}"}"
-        path="${path#"${path%%[![:space:]]*}"}"
-        path="${path%"${path##*[![:space:]]}"}"
-
+        util__trim name
+        util__trim path
         [[ -z "$name" || -z "$path" ]] && continue
 
-        SCRIPTS_NAMES+=("$name")
-        SCRIPTS_PATHS+=("$path")
+        STATE_SCRIPTS_NAMES+=("$name")
+        STATE_SCRIPTS_PATHS+=("$path")
     done < "$SCRIPTS_CONFIG_FILE"
 
-    filter_scripts
+    scripts__filter
 }
 
-filter_scripts() {
-    VISIBLE_SCRIPTS=()
-    shopt -s nocasematch
+# Filter STATE_SCRIPTS_NAMES/PATHS by STATE_SEARCH_QUERY into STATE_VISIBLE_SCRIPTS.
+# Inputs: none (reads STATE_SEARCH_QUERY, STATE_SCRIPTS_NAMES, STATE_SCRIPTS_PATHS)
+# Outputs: updates STATE_VISIBLE_SCRIPTS and clamps STATE_SCRIPTS_ROW
+# Returns: 0
+scripts__filter() {
+    STATE_VISIBLE_SCRIPTS=()
+    local query_lower="${STATE_SEARCH_QUERY,,}"
+    local i=0 n="" p="" total=${#STATE_SCRIPTS_NAMES[@]}
 
-    local safe_q pat=""
-    if [[ -n "$SEARCH_QUERY" ]]; then
-        safe_q=$(escape_glob "$SEARCH_QUERY")
-        pat="*${safe_q}*"
-    fi
-
-    local i
-    for (( i=0; i < ${#SCRIPTS_NAMES[@]}; i++ )); do
-        local n="${SCRIPTS_NAMES[$i]}"
-        local p="${SCRIPTS_PATHS[$i]}"
-        if [[ -n "$pat" ]]; then
-            [[ "$n" == $pat || "$p" == $pat ]] || continue
+    for (( i=0; i < total; i++ )); do
+        n="${STATE_SCRIPTS_NAMES[i]}"
+        p="${STATE_SCRIPTS_PATHS[i]}"
+        if [[ -n "$query_lower" ]]; then
+            [[ "${n,,}" == *"$query_lower"* || "${p,,}" == *"$query_lower"* ]] || continue
         fi
-        VISIBLE_SCRIPTS+=("$i")
+        STATE_VISIBLE_SCRIPTS+=("$i")
     done
 
-    shopt -u nocasematch
-
-    if (( ${#VISIBLE_SCRIPTS[@]} == 0 )); then
-        SCRIPTS_ROW=0
-    elif (( SCRIPTS_ROW >= ${#VISIBLE_SCRIPTS[@]} )); then
-        SCRIPTS_ROW=$(( ${#VISIBLE_SCRIPTS[@]} - 1 ))
+    local visible_count=${#STATE_VISIBLE_SCRIPTS[@]}
+    if (( visible_count == 0 )); then
+        STATE_SCRIPTS_ROW=0
+    elif (( STATE_SCRIPTS_ROW >= visible_count )); then
+        STATE_SCRIPTS_ROW=$(( visible_count - 1 ))
     fi
 }
 
-save_scripts() {
-    local config_dir
-    config_dir="$(dirname "$SCRIPTS_CONFIG_FILE")"
+# Persist STATE_SCRIPTS_NAMES and STATE_SCRIPTS_PATHS to SCRIPTS_CONFIG_FILE.
+# Inputs: none
+# Outputs: writes SCRIPTS_CONFIG_FILE
+# Returns: 0
+_scripts__save() {
+    local config_dir=""
+    util__dirname "$SCRIPTS_CONFIG_FILE" config_dir
     mkdir -p "$config_dir" 2>/dev/null || true
-    : > "$SCRIPTS_CONFIG_FILE"
-    local i
-    for (( i=0; i < ${#SCRIPTS_NAMES[@]}; i++ )); do
-        printf '%s=%s\n' "${SCRIPTS_NAMES[$i]}" "${SCRIPTS_PATHS[$i]}" >> "$SCRIPTS_CONFIG_FILE"
-    done
+
+    local i=0 total=${#STATE_SCRIPTS_NAMES[@]}
+    {
+        for (( i=0; i < total; i++ )); do
+            printf '%s=%s\n' "${STATE_SCRIPTS_NAMES[i]}" "${STATE_SCRIPTS_PATHS[i]}"
+        done
+    } > "$SCRIPTS_CONFIG_FILE"
 }
 
-add_script_to_config() {
+# Add or update a user script entry in config.
+# Inputs: $1=script name, $2=script path
+# Outputs: updates script arrays, SCRIPTS_CONFIG_FILE, status, audit log
+# Returns: 0
+scripts__add_to_config() {
     local name="$1"
     local path="$2"
 
-    local i found=0
-    for (( i=0; i < ${#SCRIPTS_NAMES[@]}; i++ )); do
-        if [[ "${SCRIPTS_NAMES[$i]}" == "$name" ]]; then
-            SCRIPTS_PATHS[$i]="$path"
+    local i=0 found=0 total=${#STATE_SCRIPTS_NAMES[@]}
+    for (( i=0; i < total; i++ )); do
+        if [[ "${STATE_SCRIPTS_NAMES[i]}" == "$name" ]]; then
+            STATE_SCRIPTS_PATHS[i]="$path"
             found=1
             break
         fi
     done
 
     if (( found == 0 )); then
-        SCRIPTS_NAMES+=("$name")
-        SCRIPTS_PATHS+=("$path")
+        STATE_SCRIPTS_NAMES+=("$name")
+        STATE_SCRIPTS_PATHS+=("$path")
     fi
 
-    save_scripts
-    filter_scripts
+    _scripts__save
+    scripts__filter
 
     if (( found == 1 )); then
-        CURRENT_STATUS="Status: Updated script '${name}' in config."
-        audit_log "UPDATE_SCRIPT_CONFIG" "$name" "SUCCESS" "Updated path to ${path}"
+        state__set_status "Status: Updated script '${name}' in config."
+        audit__log "UPDATE_SCRIPT_CONFIG" "$name" "SUCCESS" "Updated path to ${path}"
     else
-        CURRENT_STATUS="Status: Added script '${name}' to config."
-        audit_log "ADD_SCRIPT_CONFIG" "$name" "SUCCESS" "Added with path ${path}"
+        state__set_status "Status: Added script '${name}' to config."
+        audit__log "ADD_SCRIPT_CONFIG" "$name" "SUCCESS" "Added with path ${path}"
     fi
 }
 
-remove_script_from_config() {
+# Remove a user script entry by name from config.
+# Inputs: $1=script name
+# Outputs: updates script arrays, SCRIPTS_CONFIG_FILE, status, audit log
+# Returns: 0
+scripts__remove_from_config() {
     local target="$1"
-    local new_names=()
-    local new_paths=()
-    local found=0
-    local i
-    for (( i=0; i < ${#SCRIPTS_NAMES[@]}; i++ )); do
-        if [[ "${SCRIPTS_NAMES[$i]}" == "$target" ]]; then
+    local -a new_names=()
+    local -a new_paths=()
+    local i=0 found=0 total=${#STATE_SCRIPTS_NAMES[@]}
+
+    for (( i=0; i < total; i++ )); do
+        if [[ "${STATE_SCRIPTS_NAMES[i]}" == "$target" ]]; then
             found=1
         else
-            new_names+=("${SCRIPTS_NAMES[$i]}")
-            new_paths+=("${SCRIPTS_PATHS[$i]}")
+            new_names+=("${STATE_SCRIPTS_NAMES[i]}")
+            new_paths+=("${STATE_SCRIPTS_PATHS[i]}")
         fi
     done
 
     if (( found == 0 )); then
-        CURRENT_STATUS="Status: Script '${target}' not found in config."
+        state__set_status "Status: Script '${target}' not found in config."
         return 0
     fi
 
-    SCRIPTS_NAMES=("${new_names[@]+"${new_names[@]}"}")
-    SCRIPTS_PATHS=("${new_paths[@]+"${new_paths[@]}"}")
-    save_scripts
-    filter_scripts
+    STATE_SCRIPTS_NAMES=("${new_names[@]+"${new_names[@]}"}")
+    STATE_SCRIPTS_PATHS=("${new_paths[@]+"${new_paths[@]}"}")
+    _scripts__save
+    scripts__filter
 
-    CURRENT_STATUS="Status: Removed script '${target}' from config."
-    audit_log "REMOVE_SCRIPT_CONFIG" "$target" "SUCCESS" "Removed from config"
+    state__set_status "Status: Removed script '${target}' from config."
+    audit__log "REMOVE_SCRIPT_CONFIG" "$target" "SUCCESS" "Removed from config"
 }
 
-_NEW_SCRIPT_NAME=""
-_NEW_SCRIPT_PATH=""
+_scripts__prompt_add_modal() {
+    local -n _spam_name="$1"
+    local -n _spam_path="$2"
 
-_prompt_add_script_modal() {
-    _NEW_SCRIPT_NAME=""
-    _NEW_SCRIPT_PATH=""
+    _spam_name=""
+    _spam_path=""
 
     printf '%s%s' "$TERM_CURSOR_HOME" "$TERM_CLEAR_SCREEN"
-    print_box_top
-    print_box_line "  ADD USER SCRIPT" "$COLOR_TITLE$COLOR_BOLD"
-    print_box_divider
-    print_box_line "  Enter script name and path to the .sh file." "$COLOR_TEXT"
-    print_box_line "  Config file: ${SCRIPTS_CONFIG_FILE}" "$COLOR_MUTED"
-    print_box_line "  Press [Enter] on empty input to cancel." "$COLOR_MUTED"
-    print_box_bottom
+    ui__print_box_top
+    ui__print_box_line "  ADD USER SCRIPT" "$COLOR_TITLE$COLOR_BOLD"
+    ui__print_box_divider
+    ui__print_box_line "  Enter script name and path to the .sh file." "$COLOR_TEXT"
+    ui__print_box_line "  Config file: ${SCRIPTS_CONFIG_FILE}" "$COLOR_MUTED"
+    ui__print_box_line "  Press [Enter] on empty input to cancel." "$COLOR_MUTED"
+    ui__print_box_bottom
 
     printf '\n%s%s%s' "$COLOR_PRIMARY$COLOR_BOLD" "  Script Name: " "$COLOR_RESET"
-    local in_name=""
-    read -e -r in_name || return 1
-    in_name="${in_name#"${in_name%%[![:space:]]*}"}"
-    in_name="${in_name%"${in_name##*[![:space:]]}"}"
-    if [[ -z "$in_name" ]]; then
+    local _spam_in_name=""
+    read -e -r _spam_in_name || return 1
+    util__trim _spam_in_name
+    if [[ -z "$_spam_in_name" ]]; then
         return 1
     fi
 
     printf '%s%s%s' "$COLOR_PRIMARY$COLOR_BOLD" "  Path to .sh file: " "$COLOR_RESET"
-    local in_path=""
-    read -e -r in_path || return 1
-    in_path="${in_path#"${in_path%%[![:space:]]*}"}"
-    in_path="${in_path%"${in_path##*[![:space:]]}"}"
-    if [[ -z "$in_path" ]]; then
+    local _spam_in_path=""
+    read -e -r _spam_in_path || return 1
+    util__trim _spam_in_path
+    if [[ -z "$_spam_in_path" ]]; then
         return 1
     fi
 
-    in_path="${in_path/#\~/"$HOME"}"
-    in_path="$(realpath -m "$in_path" 2>/dev/null || echo "$in_path")"
+    _spam_in_path="${_spam_in_path/#\~/"$REAL_HOME"}"
+    local _spam_resolved=""
+    if _spam_resolved=$(realpath -m "$_spam_in_path" 2>/dev/null); then
+        _spam_in_path="$_spam_resolved"
+    fi
 
-    _NEW_SCRIPT_NAME="$in_name"
-    _NEW_SCRIPT_PATH="$in_path"
+    _spam_name="$_spam_in_name"
+    _spam_path="$_spam_in_path"
     return 0
 }
 
-add_script_prompt() {
-    if with_cooked_terminal _prompt_add_script_modal; then
-        add_script_to_config "$_NEW_SCRIPT_NAME" "$_NEW_SCRIPT_PATH"
+# Prompt user to add a new script via cooked-terminal modal.
+# Inputs: none
+# Outputs: adds script on confirmation or sets cancelled status
+# Returns: 0
+scripts__add_prompt() {
+    local new_name=""
+    local new_path=""
+
+    if term__with_cooked_terminal _scripts__prompt_add_modal new_name new_path; then
+        scripts__add_to_config "$new_name" "$new_path"
     else
-        CURRENT_STATUS="Status: Add script cancelled."
+        state__set_status "Status: Add script cancelled."
     fi
 }
 
-_run_script_inner() {
+_scripts__run_inner() {
     local script_name="$1"
     local script_path="$2"
 
     printf '%s%s' "$TERM_CURSOR_HOME" "$TERM_CLEAR_SCREEN"
-    print_box_top
-    print_box_line "  Running: ${script_name}" "$COLOR_TITLE$COLOR_BOLD"
-    print_box_line "  Path: ${script_path}" "$COLOR_MUTED"
-    print_box_divider
+    ui__print_box_top
+    ui__print_box_line "  Running: ${script_name}" "$COLOR_TITLE$COLOR_BOLD"
+    ui__print_box_line "  Path: ${script_path}" "$COLOR_MUTED"
+    ui__print_box_divider
 
     printf '\n'
     if [[ -f "$script_path" ]]; then
-        bash "$script_path"
-        local rc=$?
+        local rc=0
+        bash "$script_path" || rc=$?
         printf '\n'
         if (( rc == 0 )); then
-            print_box_line "  Script finished (exit 0)." "$COLOR_SUCCESS"
+            ui__print_box_line "  Script finished (exit 0)." "$COLOR_SUCCESS"
         else
-            print_box_line "  Script exited with code ${rc}." "$COLOR_WARN"
+            ui__print_box_line "  Script exited with code ${rc}." "$COLOR_WARN"
         fi
-        local _result="FAILURE"
-        (( rc == 0 )) && _result="SUCCESS"
-        audit_log "SCRIPT_RUN" "$script_name" "$_result" "exit code ${rc}"
+        local result="FAILURE"
+        if (( rc == 0 )); then
+            result="SUCCESS"
+        fi
+        audit__log "SCRIPT_RUN" "$script_name" "$result" "exit code ${rc}"
     else
-        print_box_line "  Error: Script file not found: ${script_path}" "$COLOR_ERROR$COLOR_BOLD"
-        audit_log "SCRIPT_RUN" "$script_name" "FAILURE" "file not found"
+        ui__print_box_line "  Error: Script file not found: ${script_path}" "$COLOR_ERROR$COLOR_BOLD"
+        audit__log "SCRIPT_RUN" "$script_name" "FAILURE" "file not found"
     fi
 
-    print_box_divider
-    print_box_line "  Press [Enter] to return..." "$COLOR_HIGHLIGHT$COLOR_BOLD"
-    print_box_bottom
-    read -r _
+    ui__wait_modal_footer "  Press [Enter] to return..."
 }
 
-_run_script() {
+# Execute a registered user script inside a cooked terminal modal.
+# Inputs: $1=script name, $2=script path
+# Outputs: script execution UI on stdout and audit log entry
+# Returns: 0
+scripts__run() {
     local script_name="$1"
     local script_path="$2"
-
-    with_cooked_terminal _run_script_inner "$script_name" "$script_path"
+    term__with_cooked_terminal _scripts__run_inner "$script_name" "$script_path"
 }

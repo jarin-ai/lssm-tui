@@ -1,14 +1,23 @@
+# shellcheck shell=bash
 # ==============================================================================
 # COMMAND LINE INTERFACE (CLI OPTIONS)
 # ==============================================================================
-FLAG_NO_LOG=0
-# Path overrides — set by --config / --log / --scripts flags before 01_constants.sh
-# resolves its readonly values.
-_OVERRIDE_CONFIG_FILE=""
-_OVERRIDE_LOG_FILE=""
-_OVERRIDE_SCRIPTS_CONFIG=""
 
-show_help() {
+# Module state (populated by cli__parse)
+# shellcheck disable=SC2034
+_CLI_NO_LOG=0
+# shellcheck disable=SC2034
+_CLI_OVERRIDE_CONFIG_FILE=""
+# shellcheck disable=SC2034
+_CLI_OVERRIDE_LOG_FILE=""
+# shellcheck disable=SC2034
+_CLI_OVERRIDE_SCRIPTS_CONFIG=""
+
+# Print CLI usage and keybinding help to stdout.
+# Inputs: none
+# Outputs: help text on stdout
+# Returns: 0
+cli__show_help() {
     cat << 'EOF'
 Usage: service_manager.sh [OPTIONS]
 
@@ -59,48 +68,72 @@ Examples:
 EOF
 }
 
-# Parse CLI options prior to UI initialization and pre-flight checks
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --help|-h)
-            show_help
-            exit 0
-            ;;
-        --no-log|--nn-log)
-            FLAG_NO_LOG=1
-            shift
-            ;;
-        --config)
-            if [[ -z "${2:-}" ]]; then
-                printf "Error: --config requires a path argument.\nTry '%s --help' for usage.\n" "$0" >&2
-                exit 1
-            fi
-            _OVERRIDE_CONFIG_FILE="$2"
-            shift 2
-            ;;
-        --log)
-            if [[ -z "${2:-}" ]]; then
-                printf "Error: --log requires a path argument.\nTry '%s --help' for usage.\n" "$0" >&2
-                exit 1
-            fi
-            _OVERRIDE_LOG_FILE="$2"
-            shift 2
-            ;;
-        --scripts)
-            if [[ -z "${2:-}" ]]; then
-                printf "Error: --scripts requires a path argument.\nTry '%s --help' for usage.\n" "$0" >&2
-                exit 1
-            fi
-            if [[ -d "$2" ]]; then
-                _OVERRIDE_SCRIPTS_CONFIG="${2%/}/scripts.conf"
-            else
-                _OVERRIDE_SCRIPTS_CONFIG="$2"
-            fi
-            shift 2
-            ;;
-        *)
-            printf "Error: Unknown option '%s'\nTry '%s --help' for usage.\n" "$1" "$0" >&2
-            exit 1
-            ;;
-    esac
-done
+# Validate that an option requiring a path argument received a non-empty value.
+# Inputs: $1=option flag, $2=argument value (may be empty), $3=program name
+# Outputs: error message on stderr when invalid
+# Returns: 0 if valid, 1 if missing/empty
+_cli__require_path_arg() {
+    local opt_name="$1"
+    local opt_val="$2"
+    local prog_name="$3"
+
+    if [[ -z "$opt_val" ]]; then
+        printf "Error: %s requires a path argument.\nTry '%s --help' for usage.\n" \
+            "$opt_name" "$prog_name" >&2
+        return 1
+    fi
+    return 0
+}
+
+# Parse CLI flags and populate _CLI_* state variables.
+# Inputs: $1=program name ($0), $@=CLI arguments
+# Outputs: help on stdout (--help/-h) or error message on stderr
+# Returns: 0 to continue execution, 2 if --help was displayed, 1 on parse error
+cli__parse() {
+    local prog_name="$1"
+    shift
+
+    _CLI_NO_LOG=0
+    _CLI_OVERRIDE_CONFIG_FILE=""
+    _CLI_OVERRIDE_LOG_FILE=""
+    _CLI_OVERRIDE_SCRIPTS_CONFIG=""
+
+    while (( $# > 0 )); do
+        case "$1" in
+            --help|-h)
+                cli__show_help
+                return 2
+                ;;
+            --no-log|--nn-log)
+                _CLI_NO_LOG=1
+                shift
+                ;;
+            --config)
+                _cli__require_path_arg "--config" "${2:-}" "$prog_name" || return 1
+                _CLI_OVERRIDE_CONFIG_FILE="$2"
+                shift 2
+                ;;
+            --log)
+                _cli__require_path_arg "--log" "${2:-}" "$prog_name" || return 1
+                _CLI_OVERRIDE_LOG_FILE="$2"
+                shift 2
+                ;;
+            --scripts)
+                _cli__require_path_arg "--scripts" "${2:-}" "$prog_name" || return 1
+                if [[ -d "$2" ]]; then
+                    _CLI_OVERRIDE_SCRIPTS_CONFIG="${2%/}/scripts.conf"
+                else
+                    _CLI_OVERRIDE_SCRIPTS_CONFIG="$2"
+                fi
+                shift 2
+                ;;
+            *)
+                printf "Error: Unknown option '%s'\nTry '%s --help' for usage.\n" \
+                    "$1" "$prog_name" >&2
+                return 1
+                ;;
+        esac
+    done
+
+    return 0
+}

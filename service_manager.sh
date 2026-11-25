@@ -4,523 +4,542 @@
 # Target: systemd-based Linux distributions
 # ==============================================================================
 
-set -u
-set -o pipefail
+set -euo pipefail
 
 # ==============================================================================
-# SOURCE MODULAR COMPONENTS
+# SOURCE MODULAR LIBRARIES
 # ==============================================================================
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_SM_ENTRY="${BASH_SOURCE[0]}"
+if [[ "$_SM_ENTRY" == */* ]]; then
+    _SM_DIR="${_SM_ENTRY%/*}"
+    [[ -z "$_SM_DIR" ]] && _SM_DIR="/"
+    SCRIPT_DIR="$(cd "$_SM_DIR" && pwd)"
+    unset _SM_DIR
+else
+    SCRIPT_DIR="$PWD"
+fi
+unset _SM_ENTRY
 
-source "${SCRIPT_DIR}/source.d/00_cli.sh"         # CLI flags, show_help(), option parsing
-source "${SCRIPT_DIR}/source.d/01_constants.sh"  # Colors, box chars, layout dims, paths
-source "${SCRIPT_DIR}/source.d/02_state.sh"        # State variables & associative arrays
-source "${SCRIPT_DIR}/source.d/03_terminal.sh"     # Terminal helpers, cleanup trap, audit_log
-source "${SCRIPT_DIR}/source.d/04_data.sh"         # load_services, filter_services, refresh_data
-source "${SCRIPT_DIR}/source.d/05_ui_helpers.sh"   # print_box_* frame drawing helpers
-source "${SCRIPT_DIR}/source.d/06_modals.sh"       # Modals, prompts & service actions
-source "${SCRIPT_DIR}/source.d/09_scripts.sh"     # load_scripts, add_script_prompt, _run_script
-source "${SCRIPT_DIR}/source.d/07_draw.sh"         # get_hint_text, render_cheat_sheet, draw_ui
-source "${SCRIPT_DIR}/source.d/08_input.sh"        # read_key, handle_resize, WINCH trap
+source "${SCRIPT_DIR}/source.d/00_cli.sh"
+source "${SCRIPT_DIR}/source.d/01_constants.sh"
+source "${SCRIPT_DIR}/source.d/02_state.sh"
+source "${SCRIPT_DIR}/source.d/03_terminal.sh"
+source "${SCRIPT_DIR}/source.d/04_data.sh"
+source "${SCRIPT_DIR}/source.d/05_ui_helpers.sh"
+source "${SCRIPT_DIR}/source.d/06_modals.sh"
+source "${SCRIPT_DIR}/source.d/07_draw.sh"
+source "${SCRIPT_DIR}/source.d/08_input.sh"
+source "${SCRIPT_DIR}/source.d/09_scripts.sh"
+
+# ==============================================================================
+# CONTROLLER HELPERS & EVENT HANDLERS
+# ==============================================================================
+
+_sm__install_traps() {
+    term__register_cleanup term__cleanup
+    trap 'term__run_cleanups' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    trap 'exit 129' HUP
+    trap 'input__handle_resize' WINCH
+}
+
+_sm__clear_screen() {
+    printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
+}
+
+_sm__apply_search_filters() {
+    data__filter_services
+    scripts__filter
+}
+
+_sm__switch_view() {
+    local target_view="$1"
+    if [[ "$target_view" == "scripts" ]]; then
+        STATE_CURRENT_VIEW="scripts"
+        scripts__load
+        state__set_status "Status: Scripts view active."
+    else
+        STATE_CURRENT_VIEW="services"
+        data__refresh
+        state__set_status "Status: Services view active. Systemd cache refreshed."
+    fi
+}
+
+_sm__open_help_view() {
+    STATE_HELP_MODE=1
+    STATE_HELP_SCROLL_OFFSET=0
+    STATE_SYS_BTN=4
+    STATE_FOCUS_AREA="system"
+    _sm__clear_screen
+}
+
+_sm__handle_search_key() {
+    local _hsk_key="$1"
+    local -n _hsk_redraw="$2"
+
+    case "$_hsk_key" in
+        ENTER|TAB)
+            STATE_SEARCH_MODE=0
+            if state__is_current_list_empty; then
+                STATE_FOCUS_AREA="system"
+            else
+                STATE_FOCUS_AREA="services"
+            fi
+            _hsk_redraw=1
+            ;;
+        ESC)
+            STATE_SEARCH_MODE=0
+            STATE_SEARCH_QUERY=""
+            _sm__apply_search_filters
+            _hsk_redraw=1
+            ;;
+        BACKSPACE)
+            if [[ -n "$STATE_SEARCH_QUERY" ]]; then
+                STATE_SEARCH_QUERY="${STATE_SEARCH_QUERY%?}"
+                _sm__apply_search_filters
+                _hsk_redraw=1
+            else
+                _hsk_redraw=0
+            fi
+            ;;
+        *)
+            if (( ${#_hsk_key} == 1 )); then
+                STATE_SEARCH_QUERY+="$_hsk_key"
+                _sm__apply_search_filters
+                _hsk_redraw=1
+            else
+                _hsk_redraw=0
+            fi
+            ;;
+    esac
+}
+
+_sm__handle_help_key() {
+    local _hhk_key="$1"
+    local -n _hhk_redraw="$2"
+    local -n _hhk_quit="$3"
+
+    case "$_hhk_key" in
+        q|Q)
+            _hhk_quit=1
+            ;;
+        UP)
+            if (( STATE_HELP_SCROLL_OFFSET > 0 )); then
+                STATE_HELP_SCROLL_OFFSET=$(( STATE_HELP_SCROLL_OFFSET - 1 ))
+                _hhk_redraw=1
+            else
+                _hhk_redraw=0
+            fi
+            ;;
+        DOWN)
+            local _hhk_avail=0 _hhk_total=0
+            util__clamp_list_rows "$STATE_TERM_LINES" _hhk_avail
+            draw__get_cheat_count _hhk_total
+            local _hhk_max=$(( _hhk_total - _hhk_avail ))
+            if (( _hhk_max < 0 )); then
+                _hhk_max=0
+            fi
+            if (( STATE_HELP_SCROLL_OFFSET < _hhk_max )); then
+                STATE_HELP_SCROLL_OFFSET=$(( STATE_HELP_SCROLL_OFFSET + 1 ))
+                _hhk_redraw=1
+            else
+                _hhk_redraw=0
+            fi
+            ;;
+        LEFT)
+            case "$STATE_SYS_BTN" in
+                4) STATE_SYS_BTN=3; _hhk_redraw=1 ;;
+                3) STATE_SYS_BTN=1; _hhk_redraw=1 ;;
+                2) STATE_SYS_BTN=1; _hhk_redraw=1 ;;
+                1) STATE_SYS_BTN=0; _hhk_redraw=1 ;;
+                0) _hhk_redraw=0 ;;
+                *) STATE_SYS_BTN=0; _hhk_redraw=1 ;;
+            esac
+            ;;
+        RIGHT)
+            case "$STATE_SYS_BTN" in
+                0) STATE_SYS_BTN=1; _hhk_redraw=1 ;;
+                1) STATE_SYS_BTN=3; _hhk_redraw=1 ;;
+                2) STATE_SYS_BTN=3; _hhk_redraw=1 ;;
+                3) STATE_SYS_BTN=4; _hhk_redraw=1 ;;
+                4) _hhk_redraw=0 ;;
+                *) STATE_SYS_BTN=4; _hhk_redraw=1 ;;
+            esac
+            ;;
+        ENTER)
+            case "$STATE_SYS_BTN" in
+                0)
+                    STATE_HELP_MODE=0
+                    STATE_FOCUS_AREA="system"
+                    _sm__switch_view "services"
+                    _sm__clear_screen
+                    _hhk_redraw=1
+                    ;;
+                1)
+                    STATE_HELP_MODE=0
+                    STATE_FOCUS_AREA="system"
+                    _sm__switch_view "scripts"
+                    _sm__clear_screen
+                    _hhk_redraw=1
+                    ;;
+                3)
+                    STATE_HELP_MODE=0
+                    STATE_FOCUS_AREA="system"
+                    modals__clear_config_logs
+                    _sm__clear_screen
+                    _hhk_redraw=1
+                    ;;
+                4)
+                    STATE_HELP_SCROLL_OFFSET=0
+                    STATE_FOCUS_AREA="system"
+                    _sm__clear_screen
+                    _hhk_redraw=1
+                    ;;
+                *)
+                    _hhk_redraw=0
+                    ;;
+            esac
+            ;;
+        *)
+            _hhk_redraw=0
+            ;;
+    esac
+}
+
+_sm__execute_enter_action() {
+    if [[ "$STATE_FOCUS_AREA" == "system" ]]; then
+        case "$STATE_SYS_BTN" in
+            0) _sm__switch_view "services" ;;
+            1) _sm__switch_view "scripts" ;;
+            2) STATE_SEARCH_MODE=1 ;;
+            3)
+                modals__clear_config_logs
+                _sm__clear_screen
+                ;;
+            4) _sm__open_help_view ;;
+        esac
+        return 0
+    fi
+
+    if [[ "$STATE_FOCUS_AREA" != "services" ]]; then
+        return 0
+    fi
+
+    if [[ "$STATE_CURRENT_VIEW" == "scripts" ]]; then
+        if (( ${#STATE_VISIBLE_SCRIPTS[@]} > 0 )); then
+            local s_idx="${STATE_VISIBLE_SCRIPTS[$STATE_SCRIPTS_ROW]}"
+            scripts__run "${STATE_SCRIPTS_NAMES[$s_idx]}" "${STATE_SCRIPTS_PATHS[$s_idx]}"
+            _sm__clear_screen
+        fi
+        return 0
+    fi
+
+    if (( ${#STATE_VISIBLE_SERVICES[@]} > 0 )); then
+        local svc="${STATE_VISIBLE_SERVICES[$STATE_SELECTED_ROW]}"
+        local a_state="${STATE_SVC_ACTIVE[$svc]:-unknown}"
+        local u_state="${STATE_SVC_UNIT[$svc]:-unknown}"
+
+        case "$STATE_SELECTED_BTN" in
+            0)
+                if [[ "$a_state" == "active" ]]; then
+                    modals__execute_service_action "$svc" "stop"
+                else
+                    modals__execute_service_action "$svc" "start"
+                fi
+                _sm__clear_screen
+                ;;
+            1)
+                modals__execute_service_action "$svc" "restart"
+                _sm__clear_screen
+                ;;
+            2)
+                if [[ "$u_state" == "enabled" ]]; then
+                    modals__execute_service_action "$svc" "disable"
+                else
+                    modals__execute_service_action "$svc" "enable"
+                fi
+                _sm__clear_screen
+                ;;
+        esac
+    fi
+}
+
+_sm__handle_nav_key() {
+    local _hnk_key="$1"
+    local -n _hnk_redraw="$2"
+    local -n _hnk_quit="$3"
+
+    _hnk_redraw=1
+
+    case "$_hnk_key" in
+        q|Q)
+            _hnk_quit=1
+            ;;
+        h|H)
+            _sm__open_help_view
+            ;;
+        c|C)
+            modals__clear_config_logs
+            _sm__clear_screen
+            ;;
+        d|D)
+            STATE_INFO_MODE=$(( 1 - STATE_INFO_MODE ))
+            ;;
+        r|R)
+            if [[ "$STATE_CURRENT_VIEW" == "scripts" ]]; then
+                scripts__load
+                state__set_status "Status: Scripts configuration refreshed."
+            else
+                data__refresh
+                state__set_status "Status: Systemd cache and process metrics refreshed."
+            fi
+            ;;
+        j|J)
+            if [[ "$STATE_CURRENT_VIEW" == "services" ]] && (( ${#STATE_VISIBLE_SERVICES[@]} > 0 )); then
+                modals__show_logs "${STATE_VISIBLE_SERVICES[$STATE_SELECTED_ROW]}"
+                _sm__clear_screen
+            else
+                _hnk_redraw=0
+            fi
+            ;;
+        i|I)
+            if [[ "$STATE_CURRENT_VIEW" == "services" ]] && (( ${#STATE_VISIBLE_SERVICES[@]} > 0 )); then
+                modals__show_status "${STATE_VISIBLE_SERVICES[$STATE_SELECTED_ROW]}"
+                _sm__clear_screen
+            else
+                _hnk_redraw=0
+            fi
+            ;;
+        f|F)
+            STATE_SEARCH_MODE=1
+            STATE_FOCUS_AREA="system"
+            ;;
+        ESC)
+            if [[ -n "$STATE_SEARCH_QUERY" ]]; then
+                STATE_SEARCH_QUERY=""
+                _sm__apply_search_filters
+                state__set_status "Status: Search filter cleared."
+            elif [[ "$STATE_FOCUS_AREA" == "system" ]]; then
+                if ! state__is_current_list_empty; then
+                    STATE_FOCUS_AREA="services"
+                else
+                    _hnk_redraw=0
+                fi
+            fi
+            ;;
+        TAB)
+            if [[ "$STATE_FOCUS_AREA" == "services" ]]; then
+                STATE_FOCUS_AREA="system"
+            elif ! state__is_current_list_empty; then
+                STATE_FOCUS_AREA="services"
+            else
+                _hnk_redraw=0
+            fi
+            ;;
+        HOME)
+            if state__is_current_list_empty; then
+                _hnk_redraw=0
+            else
+                STATE_FOCUS_AREA="services"
+                if [[ "$STATE_CURRENT_VIEW" == "scripts" ]]; then
+                    STATE_SCRIPTS_ROW=0
+                else
+                    STATE_SELECTED_ROW=0
+                fi
+            fi
+            ;;
+        END)
+            if state__is_current_list_empty; then
+                _hnk_redraw=0
+            else
+                STATE_FOCUS_AREA="services"
+                if [[ "$STATE_CURRENT_VIEW" == "scripts" ]]; then
+                    STATE_SCRIPTS_ROW=$(( ${#STATE_VISIBLE_SCRIPTS[@]} - 1 ))
+                else
+                    STATE_SELECTED_ROW=$(( ${#STATE_VISIBLE_SERVICES[@]} - 1 ))
+                fi
+            fi
+            ;;
+        UP)
+            if state__is_current_list_empty; then
+                _hnk_redraw=0
+            elif [[ "$STATE_FOCUS_AREA" == "services" ]]; then
+                if [[ "$STATE_CURRENT_VIEW" == "scripts" ]]; then
+                    if (( STATE_SCRIPTS_ROW > 0 )); then
+                        STATE_SCRIPTS_ROW=$(( STATE_SCRIPTS_ROW - 1 ))
+                    else
+                        STATE_FOCUS_AREA="system"
+                        STATE_SYS_BTN=1
+                    fi
+                else
+                    if (( STATE_SELECTED_ROW > 0 )); then
+                        STATE_SELECTED_ROW=$(( STATE_SELECTED_ROW - 1 ))
+                    else
+                        STATE_FOCUS_AREA="system"
+                        STATE_SYS_BTN=0
+                    fi
+                fi
+            fi
+            ;;
+        DOWN)
+            if state__is_current_list_empty; then
+                _hnk_redraw=0
+            elif [[ "$STATE_FOCUS_AREA" == "system" ]]; then
+                STATE_FOCUS_AREA="services"
+            elif [[ "$STATE_FOCUS_AREA" == "services" ]]; then
+                if [[ "$STATE_CURRENT_VIEW" == "scripts" ]]; then
+                    if (( STATE_SCRIPTS_ROW < ${#STATE_VISIBLE_SCRIPTS[@]} - 1 )); then
+                        STATE_SCRIPTS_ROW=$(( STATE_SCRIPTS_ROW + 1 ))
+                    fi
+                else
+                    if (( STATE_SELECTED_ROW < ${#STATE_VISIBLE_SERVICES[@]} - 1 )); then
+                        STATE_SELECTED_ROW=$(( STATE_SELECTED_ROW + 1 ))
+                    fi
+                fi
+            fi
+            ;;
+        p|P)
+            STATE_FOCUS_AREA="system"
+            if [[ "$STATE_CURRENT_VIEW" == "scripts" ]]; then
+                STATE_SYS_BTN=1
+            else
+                STATE_SYS_BTN=0
+            fi
+            ;;
+        LEFT)
+            if [[ "$STATE_FOCUS_AREA" == "system" ]]; then
+                if (( STATE_SYS_BTN > 0 )); then
+                    STATE_SYS_BTN=$(( STATE_SYS_BTN - 1 ))
+                fi
+            elif [[ "$STATE_FOCUS_AREA" == "services" ]]; then
+                if (( STATE_SELECTED_BTN > 0 )); then
+                    STATE_SELECTED_BTN=$(( STATE_SELECTED_BTN - 1 ))
+                fi
+            fi
+            ;;
+        RIGHT)
+            if [[ "$STATE_FOCUS_AREA" == "system" ]]; then
+                if (( STATE_SYS_BTN < 4 )); then
+                    STATE_SYS_BTN=$(( STATE_SYS_BTN + 1 ))
+                fi
+            elif [[ "$STATE_FOCUS_AREA" == "services" ]]; then
+                if (( STATE_SELECTED_BTN < 2 )); then
+                    STATE_SELECTED_BTN=$(( STATE_SELECTED_BTN + 1 ))
+                fi
+            fi
+            ;;
+        ENTER)
+            _sm__execute_enter_action
+            ;;
+        s|S)
+            if [[ "$STATE_CURRENT_VIEW" == "scripts" ]]; then
+                _sm__switch_view "services"
+            else
+                _sm__switch_view "scripts"
+            fi
+            ;;
+        a|A)
+            if [[ "$STATE_CURRENT_VIEW" == "scripts" ]]; then
+                scripts__add_prompt
+                _sm__clear_screen
+            elif (( ${#STATE_VISIBLE_SERVICES[@]} > 0 )); then
+                data__add_to_user_config "${STATE_VISIBLE_SERVICES[$STATE_SELECTED_ROW]}"
+                data__filter_services
+            fi
+            ;;
+        x|X)
+            if [[ "$STATE_CURRENT_VIEW" == "scripts" ]]; then
+                if (( ${#STATE_VISIBLE_SCRIPTS[@]} > 0 )); then
+                    local _hnk_s_idx="${STATE_VISIBLE_SCRIPTS[$STATE_SCRIPTS_ROW]}"
+                    scripts__remove_from_config "${STATE_SCRIPTS_NAMES[$_hnk_s_idx]}"
+                    if (( STATE_SCRIPTS_ROW >= ${#STATE_VISIBLE_SCRIPTS[@]} )) && (( ${#STATE_VISIBLE_SCRIPTS[@]} > 0 )); then
+                        STATE_SCRIPTS_ROW=$(( ${#STATE_VISIBLE_SCRIPTS[@]} - 1 ))
+                    fi
+                fi
+            elif (( ${#STATE_VISIBLE_SERVICES[@]} > 0 )); then
+                data__remove_from_user_config "${STATE_VISIBLE_SERVICES[$STATE_SELECTED_ROW]}"
+                if (( STATE_SELECTED_ROW >= ${#STATE_VISIBLE_SERVICES[@]} )) && (( ${#STATE_VISIBLE_SERVICES[@]} > 0 )); then
+                    STATE_SELECTED_ROW=$(( ${#STATE_VISIBLE_SERVICES[@]} - 1 ))
+                fi
+                data__filter_services
+            fi
+            ;;
+        *)
+            _hnk_redraw=0
+            ;;
+    esac
+}
 
 # ==============================================================================
 # MAIN ENTRY POINT
 # ==============================================================================
 
 main() {
+    local cli_rc=0
+    cli__parse "$0" "$@" || cli_rc=$?
+    if (( cli_rc == 2 )); then
+        return 0
+    elif (( cli_rc != 0 )); then
+        return "$cli_rc"
+    fi
+
     # Pre-flight Terminal Check
     if [[ ! -t 0 || ! -t 1 ]]; then
         printf "Error: Standard input/output is not a terminal.\n" >&2
-        exit 1
+        return 1
     fi
 
-    load_services
-    load_scripts
-    refresh_data
-    CURRENT_STATUS="Status: Ready."
+    constants__init_paths \
+        "$_CLI_OVERRIDE_CONFIG_FILE" \
+        "$_CLI_OVERRIDE_LOG_FILE" \
+        "$_CLI_OVERRIDE_SCRIPTS_CONFIG"
+
+    _sm__install_traps
+
+    data__load_services
+    scripts__load
+    data__refresh
+    state__set_status "Status: Ready."
 
     # Enter alternate screen buffer and configure raw terminal only after
     # CLI parsing and pre-flight checks pass, right before the TUI loop.
-    enter_tui_mode
-
-    # Initial Screen Clear
-    printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
+    term__enter_tui_mode
+    _sm__clear_screen
 
     local need_redraw=1
+    local should_quit=0
+    local key=""
 
-    while true; do
+    while (( should_quit == 0 )); do
         # Do not allow losing focus from action bar when a list is empty
-        if [[ "$FOCUS_AREA" == "services" ]]; then
-            if [[ "$CURRENT_VIEW" == "scripts" ]] && (( ${#VISIBLE_SCRIPTS[@]} == 0 )); then
-                FOCUS_AREA="system"
-                SYS_BTN=1
-            elif [[ "$CURRENT_VIEW" == "services" ]] && (( ${#VISIBLE_SERVICES[@]} == 0 )); then
-                FOCUS_AREA="system"
-                SYS_BTN=0
+        if [[ "$STATE_FOCUS_AREA" == "services" ]] && state__is_current_list_empty; then
+            STATE_FOCUS_AREA="system"
+            if [[ "$STATE_CURRENT_VIEW" == "scripts" ]]; then
+                STATE_SYS_BTN=1
+            else
+                STATE_SYS_BTN=0
             fi
         fi
 
         if (( need_redraw == 1 )); then
-            draw_ui
+            draw__ui
             need_redraw=0
         fi
 
-        local key
-        key=$(read_key) || break
+        input__read_key key || break
 
-        if (( SEARCH_MODE == 1 )); then
-            case "$key" in
-                ENTER|TAB)
-                    SEARCH_MODE=0
-                    local is_empty=0
-                    if [[ "$CURRENT_VIEW" == "scripts" ]]; then
-                        (( ${#VISIBLE_SCRIPTS[@]} == 0 )) && is_empty=1
-                    else
-                        (( ${#VISIBLE_SERVICES[@]} == 0 )) && is_empty=1
-                    fi
-                    if (( is_empty == 1 )); then
-                        FOCUS_AREA="system"
-                    else
-                        FOCUS_AREA="services"
-                    fi
-                    need_redraw=1
-                    ;;
-                ESC)
-                    SEARCH_MODE=0
-                    SEARCH_QUERY=""
-                    filter_services
-                    filter_scripts
-                    need_redraw=1
-                    ;;
-                BACKSPACE)
-                    if [[ -n "$SEARCH_QUERY" ]]; then
-                        SEARCH_QUERY="${SEARCH_QUERY%?}"
-                        filter_services
-                        filter_scripts
-                        need_redraw=1
-                    else
-                        need_redraw=0
-                    fi
-                    ;;
-                *)
-                    if [[ ${#key} -eq 1 ]]; then
-                        SEARCH_QUERY+="$key"
-                        filter_services
-                        filter_scripts
-                        need_redraw=1
-                    else
-                        need_redraw=0
-                    fi
-                    ;;
-            esac
+        if (( STATE_SEARCH_MODE == 1 )); then
+            _sm__handle_search_key "$key" need_redraw
             continue
         fi
 
-        # While cheat sheet is open: LEFT/RIGHT selects action, ENTER displays selected action, q/Q exits, UP/DOWN scrolls
-        if (( HELP_MODE == 1 )); then
-            case "$key" in
-                q|Q)
-                    break
-                    ;;
-                UP)
-                    if (( HELP_SCROLL_OFFSET > 0 )); then
-                        (( HELP_SCROLL_OFFSET-- ))
-                        need_redraw=1
-                    else
-                        need_redraw=0
-                    fi
-                    ;;
-                DOWN)
-                    local available_rows=$(( TERM_LINES - 15 ))
-                    (( available_rows < 5 ))  && available_rows=5
-                    (( available_rows > 15 )) && available_rows=15
-                    local max_scroll=$(( ${#CHEAT_LINES[@]} - available_rows ))
-                    (( max_scroll < 0 )) && max_scroll=0
-                    if (( HELP_SCROLL_OFFSET < max_scroll )); then
-                        (( HELP_SCROLL_OFFSET++ ))
-                        need_redraw=1
-                    else
-                        need_redraw=0
-                    fi
-                    ;;
-                LEFT)
-                    case "$SYS_BTN" in
-                        4) SYS_BTN=3; need_redraw=1 ;;
-                        3) SYS_BTN=1; need_redraw=1 ;;
-                        2) SYS_BTN=1; need_redraw=1 ;;
-                        1) SYS_BTN=0; need_redraw=1 ;;
-                        0) need_redraw=0 ;;
-                        *) SYS_BTN=0; need_redraw=1 ;;
-                    esac
-                    ;;
-                RIGHT)
-                    case "$SYS_BTN" in
-                        0) SYS_BTN=1; need_redraw=1 ;;
-                        1) SYS_BTN=3; need_redraw=1 ;;
-                        2) SYS_BTN=3; need_redraw=1 ;;
-                        3) SYS_BTN=4; need_redraw=1 ;;
-                        4) need_redraw=0 ;;
-                        *) SYS_BTN=4; need_redraw=1 ;;
-                    esac
-                    ;;
-                ENTER)
-                    case "$SYS_BTN" in
-                        0)
-                            HELP_MODE=0
-                            CURRENT_VIEW="services"
-                            FOCUS_AREA="system"
-                            refresh_data
-                            CURRENT_STATUS="Status: Services view active. Systemd cache refreshed."
-                            printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
-                            need_redraw=1
-                            ;;
-                        1)
-                            HELP_MODE=0
-                            CURRENT_VIEW="scripts"
-                            FOCUS_AREA="system"
-                            load_scripts
-                            CURRENT_STATUS="Status: Scripts view active."
-                            printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
-                            need_redraw=1
-                            ;;
-                        3)
-                            HELP_MODE=0
-                            FOCUS_AREA="system"
-                            action_clear_config_logs
-                            printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
-                            need_redraw=1
-                            ;;
-                        4)
-                            HELP_SCROLL_OFFSET=0
-                            FOCUS_AREA="system"
-                            printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
-                            need_redraw=1
-                            ;;
-                        *)
-                            need_redraw=0
-                            ;;
-                    esac
-                    ;;
-                *)
-                    need_redraw=0
-                    ;;
-            esac
+        if (( STATE_HELP_MODE == 1 )); then
+            _sm__handle_help_key "$key" need_redraw should_quit
             continue
         fi
 
-        # Normal Navigation Mode
-        need_redraw=1
-
-        case "$key" in
-            q|Q)
-                break
-                ;;
-            h|H)
-                HELP_MODE=1
-                HELP_SCROLL_OFFSET=0
-                SYS_BTN=4
-                FOCUS_AREA="system"
-                printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
-                ;;
-            c|C)
-                action_clear_config_logs
-                printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
-                ;;
-            d|D)
-                INFO_MODE=$(( 1 - INFO_MODE ))
-                ;;
-            r|R)
-                if [[ "$CURRENT_VIEW" == "scripts" ]]; then
-                    load_scripts
-                    CURRENT_STATUS="Status: Scripts configuration refreshed."
-                else
-                    refresh_data
-                    CURRENT_STATUS="Status: Systemd cache and process metrics refreshed."
-                fi
-                ;;
-            j|J)
-                if [[ "$CURRENT_VIEW" == "services" ]] && (( ${#VISIBLE_SERVICES[@]} > 0 )); then
-                    local target_svc="${VISIBLE_SERVICES[$SELECTED_ROW]}"
-                    show_log_modal "$target_svc"
-                    printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
-                fi
-                ;;
-            i|I)
-                if [[ "$CURRENT_VIEW" == "services" ]] && (( ${#VISIBLE_SERVICES[@]} > 0 )); then
-                    local target_svc="${VISIBLE_SERVICES[$SELECTED_ROW]}"
-                    show_status_modal "$target_svc"
-                    printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
-                fi
-                ;;
-            f|F)
-                SEARCH_MODE=1
-                FOCUS_AREA="system"
-                ;;
-            ESC)
-                if [[ -n "$SEARCH_QUERY" ]]; then
-                    SEARCH_QUERY=""
-                    filter_services
-                    filter_scripts
-                    CURRENT_STATUS="Status: Search filter cleared."
-                elif [[ "$FOCUS_AREA" == "system" ]]; then
-                    local is_empty=0
-                    if [[ "$CURRENT_VIEW" == "scripts" ]]; then
-                        (( ${#VISIBLE_SCRIPTS[@]} == 0 )) && is_empty=1
-                    else
-                        (( ${#VISIBLE_SERVICES[@]} == 0 )) && is_empty=1
-                    fi
-                    if (( is_empty == 0 )); then
-                        FOCUS_AREA="services"
-                    else
-                        need_redraw=0
-                    fi
-                fi
-                ;;
-            TAB)
-                local is_empty=0
-                if [[ "$CURRENT_VIEW" == "scripts" ]]; then
-                    (( ${#VISIBLE_SCRIPTS[@]} == 0 )) && is_empty=1
-                else
-                    (( ${#VISIBLE_SERVICES[@]} == 0 )) && is_empty=1
-                fi
-
-                if [[ "$FOCUS_AREA" == "services" ]]; then
-                    FOCUS_AREA="system"
-                elif (( is_empty == 0 )); then
-                    FOCUS_AREA="services"
-                else
-                    need_redraw=0
-                fi
-                ;;
-            HOME)
-                if [[ "$CURRENT_VIEW" == "scripts" ]]; then
-                    if (( ${#VISIBLE_SCRIPTS[@]} == 0 )); then
-                        need_redraw=0
-                    else
-                        FOCUS_AREA="services"
-                        SCRIPTS_ROW=0
-                    fi
-                else
-                    if (( ${#VISIBLE_SERVICES[@]} == 0 )); then
-                        need_redraw=0
-                    else
-                        FOCUS_AREA="services"
-                        SELECTED_ROW=0
-                    fi
-                fi
-                ;;
-            END)
-                if [[ "$CURRENT_VIEW" == "scripts" ]]; then
-                    if (( ${#VISIBLE_SCRIPTS[@]} == 0 )); then
-                        need_redraw=0
-                    else
-                        FOCUS_AREA="services"
-                        SCRIPTS_ROW=$(( ${#VISIBLE_SCRIPTS[@]} - 1 ))
-                    fi
-                else
-                    if (( ${#VISIBLE_SERVICES[@]} == 0 )); then
-                        need_redraw=0
-                    else
-                        FOCUS_AREA="services"
-                        SELECTED_ROW=$(( ${#VISIBLE_SERVICES[@]} - 1 ))
-                    fi
-                fi
-                ;;
-            UP)
-                local is_empty=0
-                if [[ "$CURRENT_VIEW" == "scripts" ]]; then
-                    (( ${#VISIBLE_SCRIPTS[@]} == 0 )) && is_empty=1
-                else
-                    (( ${#VISIBLE_SERVICES[@]} == 0 )) && is_empty=1
-                fi
-
-                if (( is_empty == 1 )); then
-                    need_redraw=0
-                elif [[ "$FOCUS_AREA" == "services" ]]; then
-                    if [[ "$CURRENT_VIEW" == "scripts" ]]; then
-                        if (( SCRIPTS_ROW > 0 )); then
-                            (( SCRIPTS_ROW-- ))
-                        else
-                            FOCUS_AREA="system"
-                            SYS_BTN=1
-                        fi
-                    else
-                        if (( SELECTED_ROW > 0 )); then
-                            (( SELECTED_ROW-- ))
-                        else
-                            FOCUS_AREA="system"
-                            SYS_BTN=0
-                        fi
-                    fi
-                fi
-                ;;
-            DOWN)
-                local is_empty=0
-                if [[ "$CURRENT_VIEW" == "scripts" ]]; then
-                    (( ${#VISIBLE_SCRIPTS[@]} == 0 )) && is_empty=1
-                else
-                    (( ${#VISIBLE_SERVICES[@]} == 0 )) && is_empty=1
-                fi
-
-                if (( is_empty == 1 )); then
-                    need_redraw=0
-                elif [[ "$FOCUS_AREA" == "system" ]]; then
-                    FOCUS_AREA="services"
-                elif [[ "$FOCUS_AREA" == "services" ]]; then
-                    if [[ "$CURRENT_VIEW" == "scripts" ]]; then
-                        if (( SCRIPTS_ROW < ${#VISIBLE_SCRIPTS[@]} - 1 )); then
-                            (( SCRIPTS_ROW++ ))
-                        fi
-                    else
-                        if (( SELECTED_ROW < ${#VISIBLE_SERVICES[@]} - 1 )); then
-                            (( SELECTED_ROW++ ))
-                        fi
-                    fi
-                fi
-                ;;
-            p|P)
-                FOCUS_AREA="system"
-                if [[ "$CURRENT_VIEW" == "scripts" ]]; then
-                    SYS_BTN=1
-                else
-                    SYS_BTN=0
-                fi
-                ;;
-            LEFT)
-                if [[ "$FOCUS_AREA" == "system" ]]; then
-                    if (( SYS_BTN > 0 )); then
-                        (( SYS_BTN-- ))
-                    fi
-                elif [[ "$FOCUS_AREA" == "services" ]]; then
-                    if (( SELECTED_BTN > 0 )); then
-                        (( SELECTED_BTN-- ))
-                    fi
-                fi
-                ;;
-            RIGHT)
-                if [[ "$FOCUS_AREA" == "system" ]]; then
-                    if (( SYS_BTN < 4 )); then
-                        (( SYS_BTN++ ))
-                    fi
-                elif [[ "$FOCUS_AREA" == "services" ]]; then
-                    if (( SELECTED_BTN < 2 )); then
-                        (( SELECTED_BTN++ ))
-                    fi
-                fi
-                ;;
-            ENTER)
-                if [[ "$FOCUS_AREA" == "system" ]]; then
-                    case "$SYS_BTN" in
-                        0)
-                            CURRENT_VIEW="services"
-                            refresh_data
-                            CURRENT_STATUS="Status: Services view active. Systemd cache refreshed."
-                            ;;
-                        1)
-                            CURRENT_VIEW="scripts"
-                            load_scripts
-                            CURRENT_STATUS="Status: Scripts view active."
-                            ;;
-                        2)
-                            SEARCH_MODE=1
-                            ;;
-                        3)
-                            action_clear_config_logs
-                            printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
-                            ;;
-                        4)
-                            HELP_MODE=1
-                            HELP_SCROLL_OFFSET=0
-                            SYS_BTN=4
-                            FOCUS_AREA="system"
-                            printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
-                            ;;
-                    esac
-                elif [[ "$FOCUS_AREA" == "services" ]]; then
-                    if [[ "$CURRENT_VIEW" == "scripts" ]]; then
-                        if (( ${#VISIBLE_SCRIPTS[@]} > 0 )); then
-                            local s_idx="${VISIBLE_SCRIPTS[$SCRIPTS_ROW]}"
-                            _run_script "${SCRIPTS_NAMES[$s_idx]}" "${SCRIPTS_PATHS[$s_idx]}"
-                            printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
-                        fi
-                    else
-                        if (( ${#VISIBLE_SERVICES[@]} > 0 )); then
-                            local svc="${VISIBLE_SERVICES[$SELECTED_ROW]}"
-                            local a_state="${SVC_ACTIVE_STATE[$svc]:-unknown}"
-                            local u_state="${SVC_UNIT_STATE[$svc]:-unknown}"
-
-                            case "$SELECTED_BTN" in
-                                0)
-                                    if [[ "$a_state" == "active" ]]; then
-                                        execute_service_action "$svc" "stop"
-                                    else
-                                        execute_service_action "$svc" "start"
-                                    fi
-                                    printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
-                                    ;;
-                                1)
-                                    execute_service_action "$svc" "restart"
-                                    printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
-                                    ;;
-                                2)
-                                    if [[ "$u_state" == "enabled" ]]; then
-                                        execute_service_action "$svc" "disable"
-                                    else
-                                        execute_service_action "$svc" "enable"
-                                    fi
-                                    printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
-                                    ;;
-                            esac
-                        fi
-                    fi
-                fi
-                ;;
-            s|S)
-                if [[ "$CURRENT_VIEW" == "scripts" ]]; then
-                    CURRENT_VIEW="services"
-                    refresh_data
-                    CURRENT_STATUS="Status: Services view active. Systemd cache refreshed."
-                else
-                    CURRENT_VIEW="scripts"
-                    load_scripts
-                    CURRENT_STATUS="Status: Scripts view active."
-                fi
-                ;;
-            a|A)
-                if [[ "$CURRENT_VIEW" == "scripts" ]]; then
-                    add_script_prompt
-                    printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
-                else
-                    if (( ${#VISIBLE_SERVICES[@]} > 0 )); then
-                        local target_svc="${VISIBLE_SERVICES[$SELECTED_ROW]}"
-                        add_to_user_config "$target_svc"
-                        filter_services
-                    fi
-                fi
-                ;;
-            x|X)
-                if [[ "$CURRENT_VIEW" == "scripts" ]]; then
-                    if (( ${#VISIBLE_SCRIPTS[@]} > 0 )); then
-                        local s_idx="${VISIBLE_SCRIPTS[$SCRIPTS_ROW]}"
-                        local target_name="${SCRIPTS_NAMES[$s_idx]}"
-                        remove_script_from_config "$target_name"
-                        if (( SCRIPTS_ROW >= ${#VISIBLE_SCRIPTS[@]} )) && (( ${#VISIBLE_SCRIPTS[@]} > 0 )); then
-                            SCRIPTS_ROW=$(( ${#VISIBLE_SCRIPTS[@]} - 1 ))
-                        fi
-                    fi
-                else
-                    if (( ${#VISIBLE_SERVICES[@]} > 0 )); then
-                        local target_svc="${VISIBLE_SERVICES[$SELECTED_ROW]}"
-                        remove_from_user_config "$target_svc"
-                        # Clamp cursor after removal
-                        if (( SELECTED_ROW >= ${#VISIBLE_SERVICES[@]} )) && (( ${#VISIBLE_SERVICES[@]} > 0 )); then
-                            SELECTED_ROW=$(( ${#VISIBLE_SERVICES[@]} - 1 ))
-                        fi
-                        filter_services
-                    fi
-                fi
-                ;;
-        esac
+        _sm__handle_nav_key "$key" need_redraw should_quit
     done
 }
 

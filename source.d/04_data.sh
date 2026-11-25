@@ -1,247 +1,304 @@
+# shellcheck shell=bash
 # ==============================================================================
 # DATA LOADING, FILTERING & REFRESH
 # ==============================================================================
 
-# Populate SYSCTRL_SERVICES from systemctl
-_load_sysctrl_services() {
-    SYSCTRL_SERVICES=()
-    local unit_raw
-    unit_raw=$(systemctl list-unit-files --type=service --state=enabled,disabled --no-legend --no-pager 2>/dev/null || true)
+declare -A _DATA_PINNED_MAP=()
+
+# Rebuild O(1) lookup map from STATE_USER_SERVICES.
+# Inputs: none (reads STATE_USER_SERVICES)
+# Outputs: populates _DATA_PINNED_MAP
+# Returns: 0
+_data__rebuild_pinned_map() {
+    _DATA_PINNED_MAP=()
+    local svc=""
+    for svc in "${STATE_USER_SERVICES[@]+"${STATE_USER_SERVICES[@]}"}"; do
+        _DATA_PINNED_MAP["$svc"]=1
+    done
+}
+
+# Populate STATE_SYSCTRL_SERVICES from systemctl list-unit-files.
+# Inputs: none
+# Outputs: populates STATE_SYSCTRL_SERVICES
+# Returns: 0
+_data__load_sysctrl_services() {
+    STATE_SYSCTRL_SERVICES=()
+    local line="" unit_name=""
+
     while IFS= read -r line || [[ -n "$line" ]]; do
         line="${line%$'\r'}"
         [[ -z "$line" ]] && continue
-        local unit_name="${line%% *}"
+        unit_name="${line%% *}"
         [[ "$unit_name" == *@* ]] && continue
         unit_name="${unit_name%.service}"
         [[ -z "$unit_name" ]] && continue
-        SYSCTRL_SERVICES+=("$unit_name")
-    done <<< "$unit_raw"
+        STATE_SYSCTRL_SERVICES+=("$unit_name")
+    done < <(systemctl list-unit-files --type=service --state=enabled,disabled --no-legend --no-pager 2>/dev/null || true)
 }
 
-# Populate USER_SERVICES from the config file
-_load_user_services() {
-    USER_SERVICES=()
+# Populate STATE_USER_SERVICES from CONFIG_FILE.
+# Inputs: none (reads CONFIG_FILE)
+# Outputs: populates STATE_USER_SERVICES and _DATA_PINNED_MAP
+# Returns: 0
+_data__load_user_services() {
+    STATE_USER_SERVICES=()
     if [[ ! -f "$CONFIG_FILE" ]]; then
+        _data__rebuild_pinned_map
         return 0
     fi
+
+    local line=""
     while IFS= read -r line || [[ -n "$line" ]]; do
-        line="${line#"${line%%[![:space:]]*}"}"
-        line="${line%"${line##*[![:space:]]}"}"
-        [[ -z "$line" || "$line" =~ ^# ]] && continue
-        USER_SERVICES+=("${line%.service}")
+        util__trim line
+        [[ -z "$line" || "$line" == \#* ]] && continue
+        STATE_USER_SERVICES+=("${line%.service}")
     done < "$CONFIG_FILE"
+
+    _data__rebuild_pinned_map
 }
 
-load_services() {
-    _load_sysctrl_services
-    _load_user_services
+# Load both systemd unit list and user pinned services config.
+# Inputs: none
+# Outputs: updates STATE_SYSCTRL_SERVICES and STATE_USER_SERVICES
+# Returns: 0
+data__load_services() {
+    _data__load_sysctrl_services
+    _data__load_user_services
 }
 
-# Write current USER_SERVICES to the config file
-_save_user_config() {
+# Persist STATE_USER_SERVICES to CONFIG_FILE.
+# Inputs: none (reads CONFIG_DIR, CONFIG_FILE, STATE_USER_SERVICES)
+# Outputs: writes CONFIG_FILE
+# Returns: 0
+_data__save_user_config() {
     mkdir -p "$CONFIG_DIR" 2>/dev/null || true
-    : > "$CONFIG_FILE"
-    for svc in "${USER_SERVICES[@]}"; do
-        printf '%s\n' "$svc" >> "$CONFIG_FILE"
-    done
+    local svc=""
+    {
+        for svc in "${STATE_USER_SERVICES[@]+"${STATE_USER_SERVICES[@]}"}"; do
+            printf '%s\n' "$svc"
+        done
+    } > "$CONFIG_FILE"
 }
 
-# Pin a service (add to user config)
-add_to_user_config() {
-    local svc="$1"
-    # Duplicate check
-    for existing in "${USER_SERVICES[@]+"${USER_SERVICES[@]}"}"; do
-        if [[ "$existing" == "$svc" ]]; then
-            CURRENT_STATUS="Status: '${svc}' is already pinned."
-            return 0
-        fi
-    done
-    USER_SERVICES+=("$svc")
-    _save_user_config
-    audit_log "ADD_CONFIG" "$svc" "SUCCESS" "Pinned '${svc}'"
-    CURRENT_STATUS="Status: '${svc}' pinned to top."
+# Return 0 if the given service is pinned, 1 otherwise.
+# Inputs: $1=service name
+# Outputs: none
+# Returns: 0 if pinned, 1 otherwise
+data__is_pinned() {
+    [[ -n "${_DATA_PINNED_MAP[$1]+set}" ]]
 }
 
-# Unpin a service (remove from user config)
-remove_from_user_config() {
+# Pin a service to the top of the services list and save config.
+# Inputs: $1=service name
+# Outputs: updates STATE_USER_SERVICES, _DATA_PINNED_MAP, CONFIG_FILE, status, audit log
+# Returns: 0
+data__add_to_user_config() {
     local svc="$1"
-    local new_list=()
-    local found=0
-    for existing in "${USER_SERVICES[@]+"${USER_SERVICES[@]}"}"; do
-        if [[ "$existing" == "$svc" ]]; then
-            found=1
-        else
+    if data__is_pinned "$svc"; then
+        state__set_status "Status: '${svc}' is already pinned."
+        return 0
+    fi
+
+    STATE_USER_SERVICES+=("$svc")
+    _DATA_PINNED_MAP["$svc"]=1
+    _data__save_user_config
+    audit__log "ADD_CONFIG" "$svc" "SUCCESS" "Pinned '${svc}'"
+    state__set_status "Status: '${svc}' pinned to top."
+}
+
+# Unpin a service from user config.
+# Inputs: $1=service name
+# Outputs: updates STATE_USER_SERVICES, _DATA_PINNED_MAP, CONFIG_FILE, status, audit log
+# Returns: 0
+data__remove_from_user_config() {
+    local svc="$1"
+    if ! data__is_pinned "$svc"; then
+        state__set_status "Status: '${svc}' is not pinned."
+        return 0
+    fi
+
+    local -a new_list=()
+    local existing=""
+    for existing in "${STATE_USER_SERVICES[@]+"${STATE_USER_SERVICES[@]}"}"; do
+        if [[ "$existing" != "$svc" ]]; then
             new_list+=("$existing")
         fi
     done
-    if (( found == 0 )); then
-        CURRENT_STATUS="Status: '${svc}' is not pinned."
-        return 0
-    fi
-    USER_SERVICES=("${new_list[@]+"${new_list[@]}"}")
-    _save_user_config
-    audit_log "REMOVE_CONFIG" "$svc" "SUCCESS" "Unpinned '${svc}'"
-    CURRENT_STATUS="Status: '${svc}' unpinned."
+
+    STATE_USER_SERVICES=("${new_list[@]+"${new_list[@]}"}")
+    unset '_DATA_PINNED_MAP[$svc]'
+    _data__save_user_config
+    audit__log "REMOVE_CONFIG" "$svc" "SUCCESS" "Unpinned '${svc}'"
+    state__set_status "Status: '${svc}' unpinned."
 }
 
-escape_glob() {
-    local str="$1"
-    str="${str//\\/\\\\}"
-    str="${str//\*/\\*}"
-    str="${str//\?/\\?}"
-    str="${str//\[/\\[}"
-    str="${str//\]/\\]}"
-    printf '%s' "$str"
-}
+# Build STATE_VISIBLE_SERVICES: matching pinned services first, then unpinned system services.
+# Inputs: none (reads STATE_SEARCH_QUERY, STATE_USER_SERVICES, STATE_SYSCTRL_SERVICES, STATE_SVC_DESC)
+# Outputs: updates STATE_VISIBLE_SERVICES, STATE_PINNED_COUNT, STATE_SELECTED_ROW
+# Returns: 0
+data__filter_services() {
+    # shellcheck disable=SC2034
+    STATE_VISIBLE_SERVICES=()
+    STATE_PINNED_COUNT=0
 
-# Return 0 if the given service is in USER_SERVICES (pinned), 1 otherwise.
-_is_pinned() {
-    local svc="$1"
-    for p in "${USER_SERVICES[@]+"${USER_SERVICES[@]}"}"; do
-        [[ "$p" == "$svc" ]] && return 0
-    done
-    return 1
-}
-
-# Build VISIBLE_SERVICES as: matching pinned services first, then matching
-# system (sysctrl) services that are NOT pinned.
-# PINNED_COUNT is set to the number of pinned rows at the top of VISIBLE_SERVICES.
-filter_services() {
-    VISIBLE_SERVICES=()
-    PINNED_COUNT=0
-    shopt -s nocasematch
-
-    local safe_q pat=""
-    if [[ -n "$SEARCH_QUERY" ]]; then
-        safe_q=$(escape_glob "$SEARCH_QUERY")
-        pat="*${safe_q}*"
-    fi
+    local query_lower="${STATE_SEARCH_QUERY,,}"
+    local s="" desc=""
 
     # --- Pinned section ---
-    for s in "${USER_SERVICES[@]+"${USER_SERVICES[@]}"}"; do
-        if [[ -n "$pat" ]]; then
-            local desc="${SVC_DESCRIPTION[$s]:-}"
-            [[ "$s" == $pat || "$desc" == $pat ]] || continue
+    for s in "${STATE_USER_SERVICES[@]+"${STATE_USER_SERVICES[@]}"}"; do
+        if [[ -n "$query_lower" ]]; then
+            desc="${STATE_SVC_DESC[$s]:-}"
+            [[ "${s,,}" == *"$query_lower"* || "${desc,,}" == *"$query_lower"* ]] || continue
         fi
-        VISIBLE_SERVICES+=("$s")
-        (( PINNED_COUNT++ ))
+        # shellcheck disable=SC2034
+        STATE_VISIBLE_SERVICES+=("$s")
+        STATE_PINNED_COUNT=$(( STATE_PINNED_COUNT + 1 ))
     done
 
     # --- System section (exclude pinned) ---
-    for s in "${SYSCTRL_SERVICES[@]+"${SYSCTRL_SERVICES[@]}"}"; do
-        _is_pinned "$s" && continue
-        if [[ -n "$pat" ]]; then
-            local desc="${SVC_DESCRIPTION[$s]:-}"
-            [[ "$s" == $pat || "$desc" == $pat ]] || continue
+    for s in "${STATE_SYSCTRL_SERVICES[@]+"${STATE_SYSCTRL_SERVICES[@]}"}"; do
+        data__is_pinned "$s" && continue
+        if [[ -n "$query_lower" ]]; then
+            desc="${STATE_SVC_DESC[$s]:-}"
+            [[ "${s,,}" == *"$query_lower"* || "${desc,,}" == *"$query_lower"* ]] || continue
         fi
-        VISIBLE_SERVICES+=("$s")
+        # shellcheck disable=SC2034
+        STATE_VISIBLE_SERVICES+=("$s")
     done
 
-    shopt -u nocasematch
-
-    if (( ${#VISIBLE_SERVICES[@]} == 0 )); then
-        SELECTED_ROW=0
-    elif (( SELECTED_ROW >= ${#VISIBLE_SERVICES[@]} )); then
-        SELECTED_ROW=$(( ${#VISIBLE_SERVICES[@]} - 1 ))
+    local visible_count=${#STATE_VISIBLE_SERVICES[@]}
+    if (( visible_count == 0 )); then
+        STATE_SELECTED_ROW=0
+    elif (( STATE_SELECTED_ROW >= visible_count )); then
+        STATE_SELECTED_ROW=$(( visible_count - 1 ))
     fi
 }
 
-# 1. Batched Systemd Queries & 2. Batched Process Resource Metrics
-# Queries the union of USER_SERVICES and SYSCTRL_SERVICES so that metadata is
-# always populated regardless of which section is currently visible.
-refresh_data() {
-    # Build a deduplicated union of pinned + sysctrl for the metadata query
-    declare -A _seen_refresh=()
-    local all_query=()
-    for s in "${USER_SERVICES[@]+"${USER_SERVICES[@]}"}" "${SYSCTRL_SERVICES[@]+"${SYSCTRL_SERVICES[@]}"}"; do
-        if [[ -z "${_seen_refresh[$s]+set}" ]]; then
-            _seen_refresh["$s"]=1
+# Commit one parsed systemctl show property block into service metadata maps.
+# Inputs: $1=nameref to block associative array, $2=nameref to unit->service lookup map
+# Outputs: updates STATE_SVC_ACTIVE, STATE_SVC_UNIT, STATE_SVC_DESC, STATE_SVC_PID; clears block map
+# Returns: 0
+_data__commit_unit_block() {
+    local -n _dcub_block="$1"
+    local -n _dcub_lookup="$2"
+
+    local _dcub_id="${_dcub_block[Id]:-}"
+    if [[ -z "$_dcub_id" ]]; then
+        _dcub_block=()
+        return 0
+    fi
+
+    local _dcub_clean_id="${_dcub_id%.service}"
+    local _dcub_matched_svc="${_dcub_lookup[$_dcub_id]:-${_dcub_lookup[$_dcub_clean_id]:-}}"
+
+    if [[ -n "$_dcub_matched_svc" ]]; then
+        # shellcheck disable=SC2034
+        STATE_SVC_ACTIVE["$_dcub_matched_svc"]="${_dcub_block[ActiveState]:-inactive}"
+        # shellcheck disable=SC2034
+        STATE_SVC_UNIT["$_dcub_matched_svc"]="${_dcub_block[UnitFileState]:-disabled}"
+        STATE_SVC_DESC["$_dcub_matched_svc"]="${_dcub_block[Description]:-No description available}"
+        STATE_SVC_PID["$_dcub_matched_svc"]="${_dcub_block[MainPID]:-0}"
+    fi
+
+    _dcub_block=()
+}
+
+# Query batched systemd unit properties and process metrics (CPU/RSS) for all services.
+# Inputs: none
+# Outputs: updates STATE_SVC_* and STATE_CPU_USAGE / STATE_MEM_USAGE, then calls data__filter_services
+# Returns: 0
+data__refresh() {
+    local -A seen_refresh=()
+    local -A unit_lookup=()
+    local -a all_query=()
+    local s=""
+
+    for s in "${STATE_USER_SERVICES[@]+"${STATE_USER_SERVICES[@]}"}" \
+             "${STATE_SYSCTRL_SERVICES[@]+"${STATE_SYSCTRL_SERVICES[@]}"}"; do
+        if [[ -z "${seen_refresh[$s]+set}" ]]; then
+            seen_refresh["$s"]=1
             all_query+=("$s")
-            SVC_ACTIVE_STATE["$s"]="unknown"
-            SVC_UNIT_STATE["$s"]="unknown"
-            SVC_DESCRIPTION["$s"]="Service metadata unavailable"
-            SVC_PID["$s"]="0"
-            CPU_USAGE["$s"]="0.0"
-            MEM_USAGE["$s"]="0.0"
+            unit_lookup["$s"]="$s"
+            # Passed by nameref to _data__commit_unit_block
+            # shellcheck disable=SC2034
+            unit_lookup["${s%.service}"]="$s"
+            # shellcheck disable=SC2034
+            STATE_SVC_ACTIVE["$s"]="unknown"
+            # shellcheck disable=SC2034
+            STATE_SVC_UNIT["$s"]="unknown"
+            STATE_SVC_DESC["$s"]="Service metadata unavailable"
+            STATE_SVC_PID["$s"]="0"
+            # shellcheck disable=SC2034
+            STATE_CPU_USAGE["$s"]="0.0"
+            # shellcheck disable=SC2034
+            STATE_MEM_USAGE["$s"]="0.0"
         fi
     done
 
-    if [[ ${#all_query[@]} -gt 0 ]]; then
-        local show_raw
-        show_raw=$(systemctl show "${all_query[@]}" --property=Id,ActiveState,UnitFileState,Description,MainPID 2>/dev/null || true)
-
-        declare -A block_props=()
-
-        _commit_block() {
-            local id="${block_props[Id]:-}"
-            [[ -z "$id" ]] && return 0
-            local clean_id="${id%.service}"
-            local matched_svc=""
-            for s in "${all_query[@]}"; do
-                if [[ "$s" == "$id" || "$s" == "$clean_id" ]]; then
-                    matched_svc="$s"
-                    break
-                fi
-            done
-            if [[ -n "$matched_svc" ]]; then
-                SVC_ACTIVE_STATE["$matched_svc"]="${block_props[ActiveState]:-inactive}"
-                SVC_UNIT_STATE["$matched_svc"]="${block_props[UnitFileState]:-disabled}"
-                SVC_DESCRIPTION["$matched_svc"]="${block_props[Description]:-No description available}"
-                SVC_PID["$matched_svc"]="${block_props[MainPID]:-0}"
-            fi
-            block_props=()
-        }
+    if (( ${#all_query[@]} > 0 )); then
+        local -A block_props=()
+        local line="" k="" v=""
 
         while IFS= read -r line || [[ -n "$line" ]]; do
             line="${line%$'\r'}"
             if [[ -z "$line" ]]; then
-                _commit_block
+                _data__commit_unit_block block_props unit_lookup
                 continue
             fi
             if [[ "$line" == *"="* ]]; then
-                local k="${line%%=*}"
-                local v="${line#*=}"
+                k="${line%%=*}"
+                v="${line#*=}"
+                # Passed by nameref to _data__commit_unit_block
+                # shellcheck disable=SC2034
                 block_props["$k"]="$v"
             fi
-        done <<< "$show_raw"
-        _commit_block
+        done < <(systemctl show "${all_query[@]}" \
+            --property=Id,ActiveState,UnitFileState,Description,MainPID 2>/dev/null || true)
+        _data__commit_unit_block block_props unit_lookup
 
-        local pid_list=""
+        local pid_list="" pid=""
+        local -A pid_to_svcs=()
         for s in "${all_query[@]}"; do
-            local pid="${SVC_PID[$s]:-0}"
+            pid="${STATE_SVC_PID[$s]:-0}"
             if [[ "$pid" =~ ^[0-9]+$ ]] && (( pid > 0 )); then
                 if [[ -z "$pid_list" ]]; then
                     pid_list="$pid"
                 else
                     pid_list="${pid_list},${pid}"
                 fi
+                pid_to_svcs["$pid"]="${pid_to_svcs[$pid]:-}${pid_to_svcs[$pid]:+ }${s}"
             fi
         done
 
         if [[ -n "$pid_list" ]]; then
-            local ps_raw
-            ps_raw=$(ps -o pid=,%cpu=,%mem=,rss= -p "$pid_list" 2>/dev/null || true)
+            local ps_line="" r_pid="" r_cpu="" r_rss=""
+            local mem_mb="" whole=0 frac=0
+            local -a matched_svcs=()
+
             while IFS= read -r ps_line || [[ -n "$ps_line" ]]; do
                 [[ -z "$ps_line" ]] && continue
-                read -r r_pid r_cpu r_mem r_rss <<< "$ps_line"
+                read -r r_pid r_cpu r_rss <<< "$ps_line" || continue
                 [[ -z "${r_pid:-}" || ! "$r_pid" =~ ^[0-9]+$ ]] && continue
 
-                local mem_mb="0.0"
-                if [[ "$r_rss" =~ ^[0-9]+$ ]] && (( r_rss > 0 )); then
-                    local whole=$(( r_rss / 1024 ))
-                    local frac=$(( (r_rss * 10 / 1024) % 10 ))
+                mem_mb="0.0"
+                if [[ "${r_rss:-}" =~ ^[0-9]+$ ]] && (( r_rss > 0 )); then
+                    whole=$(( r_rss / 1024 ))
+                    frac=$(( (r_rss * 10 / 1024) % 10 ))
                     mem_mb="${whole}.${frac}"
                 fi
 
-                for s in "${all_query[@]}"; do
-                    if [[ "${SVC_PID[$s]:-0}" == "$r_pid" ]]; then
-                        CPU_USAGE["$s"]="$r_cpu"
-                        MEM_USAGE["$s"]="$mem_mb"
-                    fi
-                done
-            done <<< "$ps_raw"
+                if [[ -n "${pid_to_svcs[$r_pid]+set}" ]]; then
+                    read -ra matched_svcs <<< "${pid_to_svcs[$r_pid]}"
+                    for s in "${matched_svcs[@]}"; do
+                        # shellcheck disable=SC2034
+                        STATE_CPU_USAGE["$s"]="$r_cpu"
+                        # shellcheck disable=SC2034
+                        STATE_MEM_USAGE["$s"]="$mem_mb"
+                    done
+                fi
+            done < <(ps -o pid=,%cpu=,rss= -p "$pid_list" 2>/dev/null || true)
         fi
     fi
 
-    filter_services
+    data__filter_services
 }
