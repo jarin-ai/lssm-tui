@@ -69,9 +69,8 @@ main() {
         key=$(read_key) || break
 
         if (( SEARCH_MODE == 1 )); then
-            need_redraw=1
             case "$key" in
-                ENTER)
+                ENTER|TAB)
                     SEARCH_MODE=0
                     local is_empty=0
                     if [[ "$CURRENT_VIEW" == "scripts" ]]; then
@@ -84,70 +83,23 @@ main() {
                     else
                         FOCUS_AREA="services"
                     fi
+                    need_redraw=1
                     ;;
                 ESC)
                     SEARCH_MODE=0
                     SEARCH_QUERY=""
                     filter_services
                     filter_scripts
+                    need_redraw=1
                     ;;
                 BACKSPACE)
-                    SEARCH_QUERY="${SEARCH_QUERY%?}"
-                    filter_services
-                    filter_scripts
-                    ;;
-                UP)
-                    if [[ "$CURRENT_VIEW" == "scripts" ]]; then
-                        if (( SCRIPTS_ROW > 0 )); then
-                            (( SCRIPTS_ROW-- ))
-                        fi
+                    if [[ -n "$SEARCH_QUERY" ]]; then
+                        SEARCH_QUERY="${SEARCH_QUERY%?}"
+                        filter_services
+                        filter_scripts
+                        need_redraw=1
                     else
-                        if (( SELECTED_ROW > 0 )); then
-                            (( SELECTED_ROW-- ))
-                        fi
-                    fi
-                    ;;
-                DOWN)
-                    if [[ "$CURRENT_VIEW" == "scripts" ]]; then
-                        if (( SCRIPTS_ROW < ${#VISIBLE_SCRIPTS[@]} - 1 )); then
-                            (( SCRIPTS_ROW++ ))
-                        fi
-                    else
-                        if (( SELECTED_ROW < ${#VISIBLE_SERVICES[@]} - 1 )); then
-                            (( SELECTED_ROW++ ))
-                        fi
-                    fi
-                    ;;
-                HOME)
-                    if [[ "$CURRENT_VIEW" == "scripts" ]]; then
-                        SCRIPTS_ROW=0
-                    else
-                        SELECTED_ROW=0
-                    fi
-                    ;;
-                END)
-                    if [[ "$CURRENT_VIEW" == "scripts" ]]; then
-                        if (( ${#VISIBLE_SCRIPTS[@]} > 0 )); then
-                            SCRIPTS_ROW=$(( ${#VISIBLE_SCRIPTS[@]} - 1 ))
-                        fi
-                    else
-                        if (( ${#VISIBLE_SERVICES[@]} > 0 )); then
-                            SELECTED_ROW=$(( ${#VISIBLE_SERVICES[@]} - 1 ))
-                        fi
-                    fi
-                    ;;
-                TAB)
-                    SEARCH_MODE=0
-                    local is_empty=0
-                    if [[ "$CURRENT_VIEW" == "scripts" ]]; then
-                        (( ${#VISIBLE_SCRIPTS[@]} == 0 )) && is_empty=1
-                    else
-                        (( ${#VISIBLE_SERVICES[@]} == 0 )) && is_empty=1
-                    fi
-                    if (( is_empty == 1 )); then
-                        FOCUS_AREA="system"
-                    else
-                        FOCUS_AREA="services"
+                        need_redraw=0
                     fi
                     ;;
                 *)
@@ -155,6 +107,9 @@ main() {
                         SEARCH_QUERY+="$key"
                         filter_services
                         filter_scripts
+                        need_redraw=1
+                    else
+                        need_redraw=0
                     fi
                     ;;
             esac

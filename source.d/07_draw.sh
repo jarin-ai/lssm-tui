@@ -137,53 +137,59 @@ _draw_services_list() {
     local hdr_content="  ${p_hdr_name} ${p_hdr_active} ${p_hdr_btn1} ${p_hdr_btn2} ${p_hdr_unit} ${p_hdr_btn3} "
     print_box_line "$hdr_content" "$COLOR_SECONDARY$COLOR_BOLD"
 
-    # Calculate visible rows and scroll window.
-    # Reserve 1 extra row for the separator between pinned and system sections
-    # (only when both sections have matching entries).
+    # Calculate visible rows and scroll window using virtual lines so that the
+    # pinned/system separator line is accounted for identically to service rows.
+    local total_visible=${#VISIBLE_SERVICES[@]}
     local has_separator=0
-    if (( PINNED_COUNT > 0 && ${#VISIBLE_SERVICES[@]} > PINNED_COUNT )); then
+    if (( PINNED_COUNT > 0 && total_visible > PINNED_COUNT )); then
         has_separator=1
     fi
 
-    # Scroll logic operates on virtual rows: each real service row maps 1-to-1,
-    # but the separator is an extra rendered line inserted between sections.
-    if (( SELECTED_ROW < SCROLL_OFFSET )); then
-        SCROLL_OFFSET=$SELECTED_ROW
-    elif (( SELECTED_ROW >= SCROLL_OFFSET + available_rows )); then
-        SCROLL_OFFSET=$(( SELECTED_ROW - available_rows + 1 ))
-    fi
-
-    local total_visible=${#VISIBLE_SERVICES[@]}
     if (( total_visible == 0 )); then
+        SCROLL_OFFSET=0
         print_box_line "  (No services match search filter)" "$COLOR_MUTED"
         for (( r=1; r < available_rows; r++ )); do
             print_box_line "" "$COLOR_TEXT"
         done
     else
-        # Render up to available_rows visual lines, accounting for the separator.
-        local rendered=0        # visual lines emitted so far
-        local service_idx=$SCROLL_OFFSET  # index into VISIBLE_SERVICES
-
-        # Mark separator as already consumed if the scroll window starts past
-        # the pinned/system boundary (separator scrolled out of view above).
-        local sep_rendered=0
-        if (( has_separator == 0 || SCROLL_OFFSET > PINNED_COUNT )); then
-            sep_rendered=1
+        local selected_vrow=$SELECTED_ROW
+        if (( has_separator == 1 && SELECTED_ROW >= PINNED_COUNT )); then
+            (( selected_vrow++ ))
         fi
 
-        while (( rendered < available_rows )); do
-            # Check: should we insert the separator here?
-            if (( sep_rendered == 0 && service_idx == PINNED_COUNT )); then
-                _draw_pin_separator
-                (( rendered++ ))
-                sep_rendered=1
-                (( rendered >= available_rows )) && break
-            fi
+        local total_vrows=$(( total_visible + has_separator ))
+        local max_scroll=$(( total_vrows - available_rows ))
+        (( max_scroll < 0 )) && max_scroll=0
 
-            if (( service_idx >= total_visible )); then
+        if (( selected_vrow < SCROLL_OFFSET )); then
+            SCROLL_OFFSET=$selected_vrow
+        elif (( selected_vrow >= SCROLL_OFFSET + available_rows )); then
+            SCROLL_OFFSET=$(( selected_vrow - available_rows + 1 ))
+        fi
+        if (( SCROLL_OFFSET > max_scroll )); then
+            SCROLL_OFFSET=$max_scroll
+        elif (( SCROLL_OFFSET < 0 )); then
+            SCROLL_OFFSET=0
+        fi
+
+        local rendered=0
+        while (( rendered < available_rows )); do
+            local vrow=$(( SCROLL_OFFSET + rendered ))
+            if (( vrow >= total_vrows )); then
                 print_box_line "" "$COLOR_TEXT"
                 (( rendered++ ))
                 continue
+            fi
+
+            if (( has_separator == 1 && vrow == PINNED_COUNT )); then
+                _draw_pin_separator
+                (( rendered++ ))
+                continue
+            fi
+
+            local service_idx=$vrow
+            if (( has_separator == 1 && vrow > PINNED_COUNT )); then
+                (( service_idx-- ))
             fi
 
             local svc="${VISIBLE_SERVICES[$service_idx]}"
@@ -255,7 +261,6 @@ _draw_services_list() {
                 "$row_colored" \
                 "$COLOR_BORDER" "$BOX_V" "$COLOR_RESET"
 
-            (( service_idx++ ))
             (( rendered++ ))
         done
     fi
