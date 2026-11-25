@@ -28,21 +28,22 @@ Options:
 
 Keybindings & Controls:
   [Up / Down]     Navigate rows or switch to top System Action Bar
+  [Home / End]    Jump to the first / last item in the current list
   [Left / Right]  Navigate action buttons across highlighted row
+  [Tab]           Toggle focus between the list and top System Action Bar
+  [p / P]         Jump directly to the top System Action Bar
   [Enter]         Execute highlighted action (service action or run script)
-  [t / T]         Switch to services view / refresh services
-  [s / S]         Switch to user scripts view
+  [s / S]         Toggle between Services view and User Scripts view
   [a / A]         Add: add script to config (scripts) / pin service (services)
   [x / X]         Remove: remove script (scripts) / unpin service (services)
-  [g / Home]      Jump directly to the top system action bar
-  [/]             Enter Search Mode (filters items by name and path/description)
-  [h / H]         Toggle keybinding cheat sheet view
-  [c / C]         Clear config and audit logs (prompts confirmation, resets defaults)
+  [f / F]         Enter Search Mode (filters items by name and path/description)
+  [ESC]           Exit active search mode, clear filter, or focus list
   [d / D]         Toggle Information Area view (Description <-> CPU/Memory/PID)
-  [l / L]         Open journalctl log viewer modal (services view)
+  [j / J]         Open journalctl log viewer modal (services view)
   [i / I]         Open systemctl status inspection modal (services view)
   [r / R]         Manually refresh status cache / reload scripts
-  [ESC]           Exit active search mode or clear active search query
+  [c / C]         Clear config and audit logs (prompts confirmation, resets defaults)
+  [h / H]         Toggle keybinding cheat sheet view
   [q / Q]         Cleanly exit service manager
 
 Service & Script Lists:

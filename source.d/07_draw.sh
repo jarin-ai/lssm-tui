@@ -9,9 +9,9 @@ get_hint_text() {
     fi
     if [[ "$FOCUS_AREA" == "system" ]] || (( HELP_MODE == 1 )); then
         case "$SYS_BTN" in
-            0) echo "Press [Enter] to switch to services view (or press 't')." ;;
+            0) echo "Press [Enter] to switch to services view." ;;
             1) echo "Press [Enter] to switch to user scripts view (or press 's')." ;;
-            2) echo "Press [Enter] to enter Search Mode (or press '/')." ;;
+            2) echo "Press [Enter] to enter Search Mode (or press 'f')." ;;
             3) echo "Press [Enter] to clear config & logs (or press 'c')." ;;
             4) echo "Press [Enter] to view keybinding cheat sheet (or press 'h')." ;;
         esac
@@ -20,12 +20,12 @@ get_hint_text() {
 
     if [[ "$CURRENT_VIEW" == "scripts" ]]; then
         if (( ${#VISIBLE_SCRIPTS[@]} == 0 )); then
-            echo "Press [a] to add a new script. [g/Home] jump to action bar."
+            echo "Press [a] to add a new script. [p] jump to action bar."
             return
         fi
         local actual_idx="${VISIBLE_SCRIPTS[$SCRIPTS_ROW]}"
         local current_scr="${SCRIPTS_NAMES[$actual_idx]}"
-        echo "Press [Enter] to run '${current_scr}'. [a] add script, [x] remove script. [g/Home] bar."
+        echo "Press [Enter] to run '${current_scr}'. [a] add script, [x] remove script. [p] bar."
         return
     fi
 
@@ -36,29 +36,30 @@ get_hint_text() {
 
     local current_svc="${VISIBLE_SERVICES[$SELECTED_ROW]}"
     if _is_pinned "$current_svc"; then
-        echo "[x] unpin service. [l] logs. [i] status. [d] info. [r] refresh."
+        echo "[x] unpin service. [j] logs. [i] status. [d] info. [r] refresh."
     else
-        echo "[a] pin service. [l] logs. [i] status. [d] info. [r] refresh."
+        echo "[a] pin service. [j] logs. [i] status. [d] info. [r] refresh."
     fi
 }
 
 readonly CHEAT_LINES=(
     "  [↑ / ↓]       Navigate rows or switch to system action bar"
+    "  [Home / End]  Jump to first / last item in the current list"
     "  [← / →]       Navigate action buttons across highlighted row"
-    "  [Enter]       Execute highlighted action (run script / service action)"
-    "  [g / Home]    Jump to system action bar (top command line)"
-    "  [a / A]       Add: add script to config (scripts) / pin service (services)"
-    "  [x / X]       Remove: remove script (scripts) / unpin service (services)"
-    "  [s / S]       Switch to User Scripts view"
-    "  [t / T]       Switch to Services view / refresh services"
-    "  [/]           Enter Search Mode (filters items by name and path/description)"
-    "  [h / H]       Open keybinding cheat sheet view"
-    "  [c / C]       Clear config and audit logs (prompts confirmation)"
+    "  [Tab]         Toggle focus between list and system action bar"
+    "  [p / P]       Jump directly to top system action bar"
+    "  [Enter]       Execute highlighted action (service action or script)"
+    "  [s / S]       Toggle between Services view and User Scripts view"
+    "  [a / A]       Add script to config (scripts) / pin service (services)"
+    "  [x / X]       Remove script (scripts) / unpin service (services)"
+    "  [f / F]       Enter Search Mode (filter by name or description/path)"
+    "  [ESC]         Exit active search / clear filter / focus list"
     "  [d / D]       Toggle Information Area (Description <-> CPU/Memory/PID)"
-    "  [l / L]       Open journalctl log viewer modal (services view)"
+    "  [j / J]       Open journalctl log viewer modal (services view)"
     "  [i / I]       Open systemctl status inspection modal (services view)"
     "  [r / R]       Manually refresh status cache / reload scripts"
-    "  [ESC]         Exit active search / clear filter"
+    "  [c / C]       Clear config and audit logs (prompts confirmation)"
+    "  [h / H]       Open keybinding cheat sheet view"
     "  [q / Q]       Cleanly exit service manager"
 )
 

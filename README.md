@@ -54,22 +54,22 @@ Examples:
 | Key | Action |
 | --- | --- |
 | `Up` / `Down` | Navigate list rows or move to/from the top action bar |
+| `Home` / `End` | Jump to the first or last item in the current list |
 | `Left` / `Right` | Select action button (`[start/stop]`, `[restart]`, `[enable/disable]`, or top bar buttons) |
-| `Tab` / `Shift+Tab` | Toggle focus between the list and top action bar |
+| `Tab` | Toggle focus between the list and top action bar |
+| `p` / `P` | Jump to the top system action bar |
 | `Enter` | Execute highlighted service/bar action or run selected script |
-| `g` / `G` / `Home` | Jump to the top system action bar |
-| `t` / `T` | Switch to Services view and refresh systemd cache |
 | `s` / `S` | Toggle between Services view and Scripts view |
 | `a` / `A` | Pin selected service (Services view) or add a script (Scripts view) |
 | `x` / `X` | Unpin selected service (Services view) or remove selected script (Scripts view) |
-| `/` | Enter search mode (`Enter`/`Tab` confirms, `Esc` clears) |
+| `f` / `F` | Enter search mode (`Enter`/`Tab` confirms, `Esc` clears) |
+| `Esc` | Exit search mode, clear active search query, or focus list |
 | `d` / `D` | Toggle info bar between service description and `CPU %` / `Memory` / `PID` |
-| `l` / `L` | Open `journalctl` modal (last 30 lines, Services view) |
+| `j` / `J` | Open `journalctl` modal (last 30 lines, Services view) |
 | `i` / `I` | Open `systemctl status` modal (Services view) |
 | `r` / `R` | Refresh systemd cache/metrics or reload `scripts.conf` |
 | `c` / `C` | Delete config and log files after confirmation |
 | `h` / `H` | Open scrollable keybinding cheat sheet |
-| `Esc` | Exit search mode, clear active search query, or focus list |
 | `q` / `Q` | Exit `service_manager.sh` |
 
 ## Configuration & Logs

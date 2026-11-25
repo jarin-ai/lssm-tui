@@ -118,6 +118,24 @@ main() {
                         fi
                     fi
                     ;;
+                HOME)
+                    if [[ "$CURRENT_VIEW" == "scripts" ]]; then
+                        SCRIPTS_ROW=0
+                    else
+                        SELECTED_ROW=0
+                    fi
+                    ;;
+                END)
+                    if [[ "$CURRENT_VIEW" == "scripts" ]]; then
+                        if (( ${#VISIBLE_SCRIPTS[@]} > 0 )); then
+                            SCRIPTS_ROW=$(( ${#VISIBLE_SCRIPTS[@]} - 1 ))
+                        fi
+                    else
+                        if (( ${#VISIBLE_SERVICES[@]} > 0 )); then
+                            SELECTED_ROW=$(( ${#VISIBLE_SERVICES[@]} - 1 ))
+                        fi
+                    fi
+                    ;;
                 TAB)
                     SEARCH_MODE=0
                     local is_empty=0
@@ -265,7 +283,7 @@ main() {
                     CURRENT_STATUS="Status: Systemd cache and process metrics refreshed."
                 fi
                 ;;
-            l|L)
+            j|J)
                 if [[ "$CURRENT_VIEW" == "services" ]] && (( ${#VISIBLE_SERVICES[@]} > 0 )); then
                     local target_svc="${VISIBLE_SERVICES[$SELECTED_ROW]}"
                     show_log_modal "$target_svc"
@@ -279,7 +297,7 @@ main() {
                     printf '%s%s' "$TERM_CLEAR_SCREEN" "$TERM_CURSOR_HOME"
                 fi
                 ;;
-            "/")
+            f|F)
                 SEARCH_MODE=1
                 FOCUS_AREA="system"
                 ;;
@@ -319,20 +337,38 @@ main() {
                     need_redraw=0
                 fi
                 ;;
-            BTAB)
-                local is_empty=0
+            HOME)
                 if [[ "$CURRENT_VIEW" == "scripts" ]]; then
-                    (( ${#VISIBLE_SCRIPTS[@]} == 0 )) && is_empty=1
+                    if (( ${#VISIBLE_SCRIPTS[@]} == 0 )); then
+                        need_redraw=0
+                    else
+                        FOCUS_AREA="services"
+                        SCRIPTS_ROW=0
+                    fi
                 else
-                    (( ${#VISIBLE_SERVICES[@]} == 0 )) && is_empty=1
+                    if (( ${#VISIBLE_SERVICES[@]} == 0 )); then
+                        need_redraw=0
+                    else
+                        FOCUS_AREA="services"
+                        SELECTED_ROW=0
+                    fi
                 fi
-
-                if [[ "$FOCUS_AREA" == "services" ]]; then
-                    FOCUS_AREA="system"
-                elif (( is_empty == 0 )); then
-                    FOCUS_AREA="services"
+                ;;
+            END)
+                if [[ "$CURRENT_VIEW" == "scripts" ]]; then
+                    if (( ${#VISIBLE_SCRIPTS[@]} == 0 )); then
+                        need_redraw=0
+                    else
+                        FOCUS_AREA="services"
+                        SCRIPTS_ROW=$(( ${#VISIBLE_SCRIPTS[@]} - 1 ))
+                    fi
                 else
-                    need_redraw=0
+                    if (( ${#VISIBLE_SERVICES[@]} == 0 )); then
+                        need_redraw=0
+                    else
+                        FOCUS_AREA="services"
+                        SELECTED_ROW=$(( ${#VISIBLE_SERVICES[@]} - 1 ))
+                    fi
                 fi
                 ;;
             UP)
@@ -387,7 +423,7 @@ main() {
                     fi
                 fi
                 ;;
-            g|G|HOME)
+            p|P)
                 FOCUS_AREA="system"
                 if [[ "$CURRENT_VIEW" == "scripts" ]]; then
                     SYS_BTN=1
@@ -483,11 +519,6 @@ main() {
                         fi
                     fi
                 fi
-                ;;
-            t|T)
-                CURRENT_VIEW="services"
-                refresh_data
-                CURRENT_STATUS="Status: Services view active. Systemd cache refreshed."
                 ;;
             s|S)
                 if [[ "$CURRENT_VIEW" == "scripts" ]]; then

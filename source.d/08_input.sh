@@ -20,8 +20,31 @@ read_key() {
                 B) echo "DOWN"; return 0 ;;
                 C) echo "RIGHT"; return 0 ;;
                 D) echo "LEFT"; return 0 ;;
-                Z) echo "BTAB"; return 0 ;;
                 H) echo "HOME"; return 0 ;;
+                F) echo "END"; return 0 ;;
+                Z) echo "IGNORE"; return 0 ;;
+                1|4|7|8)
+                    local tilde=""
+                    IFS= read -rsn1 -t 0.05 tilde || true
+                    if [[ "$tilde" == "~" ]]; then
+                        case "$code" in
+                            1|7) echo "HOME"; return 0 ;;
+                            4|8) echo "END"; return 0 ;;
+                        esac
+                    fi
+                    echo "IGNORE"; return 0 ;;
+                *) echo "ESC"; return 0 ;;
+            esac
+        elif [[ "$seq" == "O" ]]; then
+            local code=""
+            IFS= read -rsn1 -t 0.05 code || true
+            case "$code" in
+                A) echo "UP"; return 0 ;;
+                B) echo "DOWN"; return 0 ;;
+                C) echo "RIGHT"; return 0 ;;
+                D) echo "LEFT"; return 0 ;;
+                H) echo "HOME"; return 0 ;;
+                F) echo "END"; return 0 ;;
                 *) echo "ESC"; return 0 ;;
             esac
         fi
