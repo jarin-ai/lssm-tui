@@ -5,18 +5,6 @@
 
 declare -A _DATA_PINNED_MAP=()
 
-# Rebuild O(1) lookup map from STATE_USER_SERVICES.
-# Inputs: none (reads STATE_USER_SERVICES)
-# Outputs: populates _DATA_PINNED_MAP
-# Returns: 0
-_data__rebuild_pinned_map() {
-    _DATA_PINNED_MAP=()
-    local svc=""
-    for svc in "${STATE_USER_SERVICES[@]+"${STATE_USER_SERVICES[@]}"}"; do
-        _DATA_PINNED_MAP["$svc"]=1
-    done
-}
-
 # Populate STATE_SYSCTRL_SERVICES from systemctl list-unit-files.
 # Inputs: none
 # Outputs: populates STATE_SYSCTRL_SERVICES
@@ -36,25 +24,62 @@ _data__load_sysctrl_services() {
     done < <(systemctl list-unit-files --type=service --state=enabled,disabled --no-legend --no-pager 2>/dev/null || true)
 }
 
-# Populate STATE_USER_SERVICES from CONFIG_FILE.
+# Sort STATE_USER_SERVICES in place in alphabetic order (case-insensitive with exact tie-break).
+# Inputs: none (reads/modifies STATE_USER_SERVICES)
+# Outputs: sorts STATE_USER_SERVICES in place
+# Returns: 0
+_data__sort_user_services() {
+    local count=${#STATE_USER_SERVICES[@]}
+    if (( count <= 1 )); then
+        return 0
+    fi
+
+    local i=0 j=0
+    local key="" key_lower="" cur="" cur_lower=""
+
+    for (( i=1; i < count; i++ )); do
+        key="${STATE_USER_SERVICES[i]}"
+        key_lower="${key,,}"
+        j=$(( i - 1 ))
+
+        while (( j >= 0 )); do
+            cur="${STATE_USER_SERVICES[j]}"
+            cur_lower="${cur,,}"
+            if [[ "$cur_lower" > "$key_lower" ]] || \
+               [[ "$cur_lower" == "$key_lower" && "$cur" > "$key" ]]; then
+                STATE_USER_SERVICES[j + 1]="$cur"
+                j=$(( j - 1 ))
+            else
+                break
+            fi
+        done
+        STATE_USER_SERVICES[j + 1]="$key"
+    done
+}
+
+# Populate STATE_USER_SERVICES from CONFIG_FILE in sorted alphabetic order.
 # Inputs: none (reads CONFIG_FILE)
 # Outputs: populates STATE_USER_SERVICES and _DATA_PINNED_MAP
 # Returns: 0
 _data__load_user_services() {
     STATE_USER_SERVICES=()
+    _DATA_PINNED_MAP=()
     if [[ ! -f "$CONFIG_FILE" ]]; then
-        _data__rebuild_pinned_map
         return 0
     fi
 
-    local line=""
+    local line="" svc=""
     while IFS= read -r line || [[ -n "$line" ]]; do
         util__trim line
         [[ -z "$line" || "$line" == \#* ]] && continue
-        STATE_USER_SERVICES+=("${line%.service}")
+        svc="${line%.service}"
+        if [[ -z "${_DATA_PINNED_MAP[$svc]+set}" ]]; then
+            _DATA_PINNED_MAP["$svc"]=1
+            STATE_USER_SERVICES+=("$svc")
+        fi
     done < "$CONFIG_FILE"
 
-    _data__rebuild_pinned_map
+    _data__sort_user_services
 }
 
 # Load both systemd unit list and user pinned services config.
@@ -100,6 +125,7 @@ data__add_to_user_config() {
     fi
 
     STATE_USER_SERVICES+=("$svc")
+    _data__sort_user_services
     _DATA_PINNED_MAP["$svc"]=1
     _data__save_user_config
     audit__log "ADD_CONFIG" "$svc" "SUCCESS" "Pinned '${svc}'"
